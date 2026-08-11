@@ -1,141 +1,103 @@
-# Influencer Discovery PoC
+# Influencer Discovery PoC v0.2
 
-UI 없이 실행하는 인플루언서 탐색 PoC입니다.
+이번 버전은 v0.1의 두 가지 핵심 문제를 수정합니다.
 
-## 현재 범위
+1. seed 계정이 단순히 결과에 추가되기만 하던 문제
+2. followers 정보가 없는 계정이 최소 팔로워 필터를 통과하던 문제
 
-1. Campaign YAML 입력
-2. Apify Google Search Scraper로 Instagram 후보 탐색
-3. Seed influencer 강제 포함
-4. 선택한 Instagram Apify Actor를 통한 프로필/게시물 수집
-5. 광고성 게시물 룰 기반 탐지
-6. 카테고리 적합도 계산
-7. 평균/중앙 조회수, 광고 조회수, Engagement 계산
-8. 후보 Score 계산
-9. SQLite 저장
-10. Excel 출력 + 사람 검토용 컬럼 생성
+## 핵심 변화
 
----
+### Seed discovery
+`lamuzes`, `2dumi`를 Instagram Profile Scraper에 넣고
+각 프로필의 `relatedProfiles`를 후보로 가져옵니다.
 
-## 디렉토리
+depth=2인 경우:
 
-```text
-influencer_discovery_poc/
-├─ config/
-│  └─ campaign.yaml
-├─ data/
-├─ output/
-├─ src/
-│  ├─ discovery/
-│  │  └─ apify_google.py
-│  ├─ collectors/
-│  │  └─ apify_instagram.py
-│  ├─ analysis/
-│  │  ├─ ad_detector.py
-│  │  ├─ category.py
-│  │  ├─ metrics.py
-│  │  └─ scoring.py
-│  ├─ storage/
-│  │  └─ sqlite_store.py
-│  ├─ exporters/
-│  │  └─ excel_exporter.py
-│  ├─ config_loader.py
-│  └─ models.py
-├─ .env.example
-├─ requirements.txt
-├─ README.md
-└─ main.py
+seed
+→ related profile
+→ related profile의 related profile
+
+까지 확장합니다.
+
+### Hard follower filtering
+모든 후보를 `apify/instagram-profile-scraper`로 다시 조회해서
+`followersCount`를 가져온 뒤 필터합니다.
+
+기본 설정:
+
+```yaml
+min_followers: 30000
+max_followers: 500000
+allow_unknown_followers: false
 ```
 
-## 설치
+따라서 followers가 30,000 미만이거나 아예 조회되지 않은 계정은
+최종 Excel에 들어가지 않습니다.
 
-Python 3.10+ 권장.
-
-Windows / Anaconda:
+## 실행
 
 ```bash
-conda create -n influencer_poc python=3.11 -y
 conda activate influencer_poc
-
 pip install -r requirements.txt
 ```
 
-`.env.example`을 `.env`로 복사:
+`.env`
 
 ```text
 APIFY_TOKEN=...
-INSTAGRAM_ACTOR_ID=...
 ```
 
-## 1차 실행: Discovery only
-
-Instagram Actor ID를 비워두어도 됩니다.
+실행:
 
 ```bash
 python main.py --config config/campaign.yaml
 ```
 
-이 경우 Google 검색을 통해 후보 Instagram URL을 수집하고,
-`output/candidates.xlsx`를 만듭니다.
+## 테스트 권장
 
-## Instagram 데이터까지 수집
+처음에는 Google keyword discovery를 끄고
+Seed similarity pipeline만 확인하는 것이 좋습니다.
 
-Apify Store에서 사용할 Instagram scraper Actor를 선택한 뒤:
-
-```text
-INSTAGRAM_ACTOR_ID=creator/actor-name
+```yaml
+use_keyword_search: false
+seed_expansion_depth: 1
+max_related_per_profile: 10
+max_seed_candidates: 20
 ```
 
-을 `.env`에 입력합니다.
+정상 동작이 확인되면:
 
-Actor마다 입력/출력 스키마가 다를 수 있으므로
-`src/collectors/apify_instagram.py`의 아래 세 함수만 맞춰주면 됩니다.
-
-```python
-build_input()
-parse_profile()
-parse_post()
+```yaml
+use_keyword_search: true
+seed_expansion_depth: 2
+max_related_per_profile: 20
+max_seed_candidates: 120
 ```
 
-그 외의 DB, 분석, Score, Excel 출력 코드는 그대로 유지합니다.
+으로 확대하세요.
 
-## 출력
+## Excel에서 확인할 컬럼
 
-### SQLite
-`data/influencers.db`
+- source
+  - `seed_related`: seed 계정 기반 발견
+  - `keyword`: 검색 쿼리 기반 발견
 
-Tables:
-- influencers
-- posts
-- reviews
+- source_seed
+  - 어떤 계정을 통해 발견됐는지
 
-### Excel
-`output/candidates.xlsx`
+- discovery_depth
+  - seed에서 몇 단계 떨어져 있는지
 
-사람이 다음 컬럼을 직접 채우도록 설계했습니다.
+- followers
+  - 실제 follower filter에 사용
 
-- review_status
-- reject_reason
-- reviewer_note
+- seed_similarity
+  - v0.2에서는 Instagram related profile 여부 중심의 단순 점수
 
-이 Human Review 데이터를 다음 버전에서 Ranking 모델 개선 데이터로 사용할 수 있습니다.
+## 다음 버전
 
-## 다음 구현 권장 순서
+v0.3에서는 seed 계정과 후보 계정의 bio + caption을 embedding하여
+실제 콘텐츠 유사도를 계산하는 것이 좋습니다.
 
-### v0.2
-- 실제 사용할 Instagram Actor 확정 및 adapter 연결
-- 광고 탐지 정밀화
-- 브랜드명 추출
-- Reel / Feed 분리
-- 최근 N개월 조건
-
-### v0.3
-- LLM 카테고리 분류
-- Seed influencer similarity
-- reject reason 학습/반영
-- campaign/search run 테이블 추가
-
-### v0.4
-- FastAPI wrapper
-- PostgreSQL 전환
-- CRM / Email 모듈 연결
+현재 v0.2는 "Instagram이 related profile로 연결했는가"를
+가장 강한 similarity signal로 사용합니다.

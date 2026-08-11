@@ -1,64 +1,47 @@
 import re
-from typing import List
 from apify_client import ApifyClient
-
 from src.models import Candidate
 
-
-INSTAGRAM_PROFILE_RE = re.compile(
+PROFILE_RE = re.compile(
     r"^https?://(?:www\.)?instagram\.com/([A-Za-z0-9._]+)/?(?:\?.*)?$"
 )
 
-EXCLUDED_PATHS = {
-    "p", "reel", "reels", "stories", "explore", "accounts",
-    "direct", "about", "developer"
+EXCLUDED = {
+    "p", "reel", "reels", "stories", "explore",
+    "accounts", "direct", "about", "developer"
 }
 
 
-def normalize_instagram_profile(url: str):
+def normalize_profile(url):
     if not url:
         return None
 
-    url = url.strip()
-    match = INSTAGRAM_PROFILE_RE.match(url)
-    if not match:
+    m = PROFILE_RE.match(url.strip())
+    if not m:
         return None
 
-    username = match.group(1)
-    if username.lower() in EXCLUDED_PATHS:
+    username = m.group(1)
+    if username.lower() in EXCLUDED:
         return None
 
-    return username, f"https://www.instagram.com/{username}/"
+    return username
 
 
-def _extract_organic_results(item: dict):
-    # Apify Google Search actor output has changed names over time.
-    # Support the common variants instead of coupling to one exact schema.
-    for key in (
-        "organicResults",
-        "nonPromotedSearchResults",
-        "searchResults",
-    ):
-        value = item.get(key)
-        if isinstance(value, list):
-            return value
-    return []
-
-
-def discover_instagram_candidates(
+def discover_by_keywords(
     client: ApifyClient,
-    queries: List[str],
+    queries: list[str],
     actor_id: str,
-    max_pages_per_query: int = 1,
-    result_limit: int = 100,
-) -> List[Candidate]:
-    search_queries = [
-        f'site:instagram.com "{query}" -inurl:/p/ -inurl:/reel/'
-        for query in queries
-    ]
+    max_pages_per_query: int,
+    result_limit: int,
+):
+    if not queries:
+        return []
 
     run_input = {
-        "queries": "\n".join(search_queries),
+        "queries": "\\n".join(
+            f'site:instagram.com "{q}" -inurl:/p/ -inurl:/reel/'
+            for q in queries
+        ),
         "maxPagesPerQuery": max_pages_per_query,
         "geminiSearch": {"enableGemini": False},
         "perplexitySearch": {
@@ -73,34 +56,49 @@ def discover_instagram_candidates(
 
     run = client.actor(actor_id).call(run_input=run_input)
     if run is None:
-        raise RuntimeError("Google Search Actor run failed.")
+        return []
 
     dataset_id = getattr(run, "default_dataset_id", None)
     if not dataset_id and isinstance(run, dict):
         dataset_id = run.get("defaultDatasetId")
 
     if not dataset_id:
-        raise RuntimeError("Could not find default dataset id from Actor run.")
+        return []
 
-    candidates = {}
+    result = {}
+
     for item in client.dataset(dataset_id).iterate_items():
-        search_term = item.get("searchQuery", {}).get("term") or item.get("query") or ""
-        for result in _extract_organic_results(item):
-            url = result.get("url") or result.get("link")
-            parsed = normalize_instagram_profile(url)
-            if not parsed:
+        search_term = (
+            (item.get("searchQuery") or {}).get("term")
+            or item.get("query")
+            or ""
+        )
+
+        organic = (
+            item.get("organicResults")
+            or item.get("nonPromotedSearchResults")
+            or item.get("searchResults")
+            or []
+        )
+
+        for entry in organic:
+            username = normalize_profile(entry.get("url") or entry.get("link"))
+            if not username:
                 continue
 
-            username, profile_url = parsed
             key = username.lower()
-            if key not in candidates:
-                candidates[key] = Candidate(
+            result.setdefault(
+                key,
+                Candidate(
                     username=username,
-                    profile_url=profile_url,
-                    source_query=search_term,
+                    profile_url=f"https://www.instagram.com/{username}/",
+                    source="keyword",
+                    source_seed="",
+                    discovery_depth=0,
                 )
+            )
 
-            if len(candidates) >= result_limit:
-                return list(candidates.values())
+            if len(result) >= result_limit:
+                return list(result.values())
 
-    return list(candidates.values())
+    return list(result.values())

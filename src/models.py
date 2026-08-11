@@ -1,18 +1,23 @@
 from dataclasses import dataclass, field
-from typing import Optional, List, Dict
+from typing import Optional, Dict
 
 
 @dataclass
 class Candidate:
     username: str
     profile_url: str
-    source_query: str = ""
+    source: str = ""
+    source_seed: str = ""
+    discovery_depth: int = 0
+
     display_name: str = ""
     bio: str = ""
     followers: Optional[int] = None
     following: Optional[int] = None
     post_count: Optional[int] = None
+
     category_scores: Dict[str, float] = field(default_factory=dict)
+    seed_similarity: float = 0.0
     score: float = 0.0
 
 

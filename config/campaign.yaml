@@ -1,27 +1,37 @@
 campaign:
-  name: "reset48_poc"
+  name: "reset48_poc_v02"
   product: "클렌즈 음료"
-  target_description: "자기관리, 운동, 직장인 여성 중심의 라이프스타일 인플루언서"
 
 discovery:
-  platform: "instagram"
-  result_limit: 100
+  # keyword_search는 보조 소스입니다.
+  use_keyword_search: false
   google_actor_id: "apify/google-search-scraper"
   max_pages_per_query: 1
+  keyword_result_limit: 50
+
   queries:
     - "자기관리 직장인 여성 인플루언서"
-    - "운동 직장인 여성 인스타그램"
-    - "오운완 여성 인플루언서"
-    - "러닝 여성 인플루언서"
-    - "건강관리 라이프스타일 인플루언서"
+    - "운동 자기관리 여성 인플루언서"
+    - "라이프스타일 여성 인플루언서"
+
+  # 핵심: 아래 seed에서 Instagram relatedProfiles를 따라 후보를 확장합니다.
   seed_usernames:
-    - "example_seed_1"
-    - "example_seed_2"
+    - "lamuzes"
+    - "2dumi"
+
+  seed_expansion_depth: 1
+  max_related_per_profile: 30
+  max_seed_candidates: 120
 
 filters:
   min_followers: 30000
   max_followers: 500000
-  min_posts_for_analysis: 3
+
+  # 중요: followers를 못 가져온 계정은 통과시키지 않습니다.
+  allow_unknown_followers: false
+
+  # seed 계정 자체는 비교 기준이므로 결과 후보에서는 기본 제외.
+  include_seed_accounts: false
 
 analysis:
   ad_keywords:
@@ -31,7 +41,7 @@ analysis:
     - "#유료광고"
     - "paid partnership"
     - "sponsored"
-    - "ad"
+
   category_keywords:
     fitness:
       - "운동"
@@ -52,6 +62,12 @@ analysis:
       - "퇴근"
       - "회사"
       - "오피스"
+    lifestyle:
+      - "일상"
+      - "라이프"
+      - "브이로그"
+      - "여행"
+      - "카페"
     beauty:
       - "뷰티"
       - "메이크업"
@@ -60,10 +76,11 @@ analysis:
 
 scoring:
   weights:
-    category_fit: 0.35
-    ad_performance: 0.30
-    engagement: 0.20
-    follower_fit: 0.15
+    seed_similarity: 0.35
+    category_fit: 0.20
+    ad_performance: 0.20
+    engagement: 0.15
+    follower_fit: 0.10
 
 output:
   sqlite_path: "data/influencers.db"
