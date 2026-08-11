@@ -1,0 +1,70 @@
+campaign:
+  name: "reset48_poc"
+  product: "클렌즈 음료"
+  target_description: "자기관리, 운동, 직장인 여성 중심의 라이프스타일 인플루언서"
+
+discovery:
+  platform: "instagram"
+  result_limit: 100
+  google_actor_id: "apify/google-search-scraper"
+  max_pages_per_query: 1
+  queries:
+    - "자기관리 직장인 여성 인플루언서"
+    - "운동 직장인 여성 인스타그램"
+    - "오운완 여성 인플루언서"
+    - "러닝 여성 인플루언서"
+    - "건강관리 라이프스타일 인플루언서"
+  seed_usernames:
+    - "example_seed_1"
+    - "example_seed_2"
+
+filters:
+  min_followers: 30000
+  max_followers: 500000
+  min_posts_for_analysis: 3
+
+analysis:
+  ad_keywords:
+    - "#광고"
+    - "#협찬"
+    - "#제품제공"
+    - "#유료광고"
+    - "paid partnership"
+    - "sponsored"
+    - "ad"
+  category_keywords:
+    fitness:
+      - "운동"
+      - "헬스"
+      - "러닝"
+      - "필라테스"
+      - "요가"
+      - "오운완"
+    selfcare:
+      - "자기관리"
+      - "건강관리"
+      - "루틴"
+      - "웰니스"
+      - "식단"
+    office:
+      - "직장인"
+      - "출근"
+      - "퇴근"
+      - "회사"
+      - "오피스"
+    beauty:
+      - "뷰티"
+      - "메이크업"
+      - "화장품"
+      - "스킨케어"
+
+scoring:
+  weights:
+    category_fit: 0.35
+    ad_performance: 0.30
+    engagement: 0.20
+    follower_fit: 0.15
+
+output:
+  sqlite_path: "data/influencers.db"
+  excel_path: "output/candidates.xlsx"
