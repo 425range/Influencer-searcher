@@ -1,0 +1,24 @@
+input:
+  candidates_excel: "output/candidates.xlsx"
+  username_column: "username"
+
+apify:
+  actor_id: "apify/instagram-profile-scraper"
+
+images:
+  images_per_account: 6
+  request_timeout_seconds: 15
+
+siglip:
+  model_name: "google/siglip2-base-patch16-224"
+  batch_size: 8
+
+seeds:
+  usernames:
+    - "lamuzes"
+    - "2dumi"
+
+output:
+  candidates_with_images: "output/candidates_with_images.xlsx"
+  visual_results: "output/visual_results.xlsx"
+  embeddings_cache: "cache/account_embeddings.pt"
