@@ -2,32 +2,30 @@ from pathlib import Path
 import pandas as pd
 
 
-def export(rows, path):
+def _format_sheet(writer, sheet_name):
+    ws = writer.book[sheet_name]
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = ws.dimensions
+    for cells in ws.columns:
+        letter = cells[0].column_letter
+        max_len = max(len(str(c.value)) if c.value is not None else 0 for c in cells)
+        ws.column_dimensions[letter].width = min(max(max_len + 2, 10), 45)
+
+
+def export(candidates_rows, reels_rows, rejected_rows, path):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    df = pd.DataFrame(rows)
-    if not df.empty:
-        df = df.sort_values(
-            ["score", "followers"],
-            ascending=[False, False]
-        )
-
-    for col in ["review_status", "reject_reason", "reviewer_note"]:
-        if col not in df.columns:
-            df[col] = ""
+    cdf = pd.DataFrame(candidates_rows)
+    rdf = pd.DataFrame(reels_rows)
+    xdf = pd.DataFrame(rejected_rows)
 
     with pd.ExcelWriter(path, engine="openpyxl") as writer:
-        df.to_excel(writer, sheet_name="Candidates", index=False)
+        cdf.to_excel(writer, sheet_name="Candidates", index=False)
+        _format_sheet(writer, "Candidates")
 
-        ws = writer.book["Candidates"]
-        ws.freeze_panes = "A2"
-        ws.auto_filter.ref = ws.dimensions
+        rdf.to_excel(writer, sheet_name="Reels", index=False)
+        _format_sheet(writer, "Reels")
 
-        for cells in ws.columns:
-            letter = cells[0].column_letter
-            max_len = max(
-                len(str(c.value)) if c.value is not None else 0
-                for c in cells
-            )
-            ws.column_dimensions[letter].width = min(max(max_len + 2, 10), 45)
+        xdf.to_excel(writer, sheet_name="Rejected", index=False)
+        _format_sheet(writer, "Rejected")

@@ -1,0 +1,132 @@
+campaign:
+  name: "doctor_youtube_discovery"
+  product: "풀무원 디자인밀 / 건강·영양 관련 제품"
+  target_description: >
+    실제 의사 또는 전문의가 운영하거나 의사가 핵심 출연자로 활동하며,
+    건강·질환·영양·식단·생활습관 콘텐츠를 제작하고,
+    광고/협찬 콘텐츠 집행 경험이 있는 대형 YouTube 채널
+
+youtube:
+  enabled: true
+
+  # Apify Store Actor
+  actor_id: "streamers/youtube-scraper"
+
+  # Seed는 '발견 결과에 그냥 추가'되는 것이 아니라
+  # 최근 영상 텍스트를 수집해 후보 similarity 계산의 기준으로 사용됩니다.
+  seed_channel_urls:
+    - "https://www.youtube.com/channel/UCVfLNEch9YxD4tX1L-crkMQ"  # 닥터프렌즈
+    # 아래에는 실제 채널 URL을 추가하세요.
+    # - "https://www.youtube.com/@CHANNEL_HANDLE"
+
+  # 후보 채널을 찾기 위한 YouTube 검색어.
+  search_queries:
+    - "의사 건강 채널"
+    - "의사 건강정보"
+    - "전문의 건강 유튜브"
+    - "내과 전문의 건강"
+    - "가정의학과 의사"
+    - "당뇨 의사"
+    - "혈당 전문의"
+    - "비만 전문의"
+    - "다이어트 의사"
+    - "영양 의사"
+    - "건강기능식품 의사"
+    - "식단 의사"
+    - "의사 영양제"
+    - "의사 유료광고"
+
+  # 검색어 1개당 가져올 영상 수.
+  # 검색 결과의 channelUrl을 후보 채널로 변환합니다.
+  search_results_per_query: 12
+
+  # 후보 채널 하나당 최근 일반 영상 수.
+  videos_per_channel: 20
+
+  # Shorts/라이브는 첫 PoC에서 제외.
+  max_results_shorts: 0
+  max_result_streams: 0
+
+  max_candidate_channels: 80
+
+filters:
+  min_subscribers: 100000
+  max_subscribers: 5000000
+
+  # 구독자 수를 못 가져온 채널은 제외.
+  allow_unknown_subscribers: false
+
+  # 의사 관련성이 너무 낮은 채널 제거용.
+  min_doctor_score: 0.15
+
+analysis:
+  ad_keywords:
+    - "유료광고"
+    - "유료 광고"
+    - "#광고"
+    - "#협찬"
+    - "협찬"
+    - "제작지원"
+    - "제작 지원"
+    - "제품제공"
+    - "제품 제공"
+    - "지원받아"
+    - "지원을 받아"
+    - "브랜드와 함께"
+    - "paid promotion"
+    - "sponsored"
+    - "advertisement"
+
+  # 채널/영상 title + description에서 계산
+  category_keywords:
+    doctor:
+      - "의사"
+      - "전문의"
+      - "의학"
+      - "병원"
+      - "원장"
+      - "교수"
+      - "닥터"
+
+    internal_medicine:
+      - "내과"
+      - "당뇨"
+      - "혈당"
+      - "고혈압"
+      - "콜레스테롤"
+      - "대사"
+
+    diet:
+      - "다이어트"
+      - "비만"
+      - "체중"
+      - "체지방"
+      - "식단"
+
+    nutrition:
+      - "영양"
+      - "영양제"
+      - "건강기능식품"
+      - "건기식"
+      - "비타민"
+      - "단백질"
+
+    health:
+      - "건강"
+      - "질환"
+      - "예방"
+      - "치료"
+      - "검진"
+      - "생활습관"
+
+scoring:
+  weights:
+    doctor_fit: 0.25
+    seed_similarity: 0.25
+    ad_performance: 0.25
+    engagement: 0.15
+    subscriber_fit: 0.10
+
+output:
+  sqlite_path: "data/doctor_youtube.db"
+  excel_path: "output/doctor_youtube_candidates.xlsx"

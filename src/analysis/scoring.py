@@ -1,37 +1,41 @@
 def follower_fit(followers, minimum, maximum):
     if followers is None or followers < minimum or followers > maximum:
         return 0.0
-
-    # Broadly reward accounts inside the requested band.
     return 1.0
 
 
-def final_score(candidate, metrics, filters, weights):
-    desired_category = (
-        candidate.category_scores.get("fitness", 0)
-        + candidate.category_scores.get("selfcare", 0)
-        + candidate.category_scores.get("office", 0)
-        + candidate.category_scores.get("lifestyle", 0)
-    ) / 4
+def category_fit(candidate, desired_categories, soft_exclude_hits=0, soft_penalty=0.10):
+    categories = desired_categories or list(candidate.category_scores.keys())
+    values = [candidate.category_scores.get(x, 0.0) for x in categories]
+    base = sum(values) / len(values) if values else 0.0
+    return max(0.0, min(1.0, base - soft_exclude_hits * soft_penalty))
 
-    beauty_penalty = candidate.category_scores.get("beauty", 0) * 0.20
-    category_fit = max(0.0, min(1.0, desired_category - beauty_penalty))
 
-    ad_perf = min(metrics.get("ad_to_organic_ratio", 0), 1.0)
-    engagement = min(metrics.get("engagement_on_views", 0) / 0.08, 1.0)
+def pre_score(candidate, filters, desired_categories, soft_exclude_hits=0):
+    # v0.4: discovery source is not allowed to dominate the ranking.
+    # This score is only a light fallback before visual ranking.
+    cfit = category_fit(candidate, desired_categories, soft_exclude_hits)
+    ffit = follower_fit(candidate.followers, filters["min_followers"], filters["max_followers"])
+    return round((0.75 * cfit + 0.25 * ffit) * 100, 2)
 
-    ffit = follower_fit(
-        candidate.followers,
-        filters["min_followers"],
-        filters["max_followers"],
-    )
+
+def final_score(candidate, reel_metrics, filters, cfg, soft_exclude_hits=0):
+    weights = cfg.get("weights", {})
+    desired = cfg.get("desired_categories", [])
+
+    visual = candidate.visual_similarity if candidate.visual_similarity is not None else 0.0
+    cfit = category_fit(candidate, desired, soft_exclude_hits)
+    ffit = follower_fit(candidate.followers, filters["min_followers"], filters["max_followers"])
+
+    # Clamp performance components to stable 0..1 ranges.
+    ad_perf = min(max(reel_metrics.get("ad_view_ratio", 0.0), 0.0), 1.0)
+    eng = min(max(reel_metrics.get("ad_engagement_rate", 0.0) / 0.08, 0.0), 1.0)
 
     score = (
-        candidate.seed_similarity * weights["seed_similarity"]
-        + category_fit * weights["category_fit"]
-        + ad_perf * weights["ad_performance"]
-        + engagement * weights["engagement"]
-        + ffit * weights["follower_fit"]
+        visual * weights.get("visual_similarity", 0.40)
+        + cfit * weights.get("category_fit", 0.20)
+        + ad_perf * weights.get("ad_performance", 0.20)
+        + eng * weights.get("engagement", 0.15)
+        + ffit * weights.get("follower_fit", 0.05)
     )
-
     return round(score * 100, 2)
