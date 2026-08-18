@@ -1,5 +1,5 @@
 campaign:
-  name: "influencer_discovery_poc_v04"
+  name: "influencer_discovery_poc_v05_gui"
   product: "클렌즈 음료"
 
 discovery:
@@ -117,4 +117,4 @@ scoring:
 
 output:
   sqlite_path: "data/influencers.db"
-  excel_path: "output/candidates_v04.xlsx"
+  excel_path: "output/candidates_v05.xlsx"
