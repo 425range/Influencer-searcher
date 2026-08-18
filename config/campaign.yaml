@@ -1,5 +1,5 @@
 campaign:
-  name: influencer_discovery_poc_v05_gui
+  name: influencer_discovery_poc_v06_gui
   product: 클렌즈 음료
 discovery:
   use_keyword_search: true
@@ -10,15 +10,19 @@ discovery:
   - 자기관리 직장인 여성 인플루언서
   - 운동 자기관리 여성 인플루언서
   - 라이프스타일 여성 인플루언서
+  - 연애프로그램 출연 여성 인플루언서
   seed_usernames:
   - lamuzes
   - 2dumi
+  - m.inngu
+  - dano_day
+  - __haeppy
   seed_expansion_depth: 2
-  max_related_per_profile: 20
-  max_seed_candidates: 120
+  max_related_per_profile: 30
+  max_seed_candidates: 200
 filters:
-  min_followers: 30000
-  max_followers: 500000
+  min_followers: 100000
+  max_followers: 1000000
   allow_unknown_followers: false
   include_seed_accounts: false
 targeting:
@@ -27,12 +31,15 @@ targeting:
   - 운동
   - 직장인
   - 라이프스타일
+  - 웰니스
+  - 건강
   hard_exclude_keywords:
   - 육아
   - 키즈
-  - 여행
+  - 먹방
   soft_exclude_keywords:
   - 뷰티
+  - 성형
   - 화장품
   soft_exclude_penalty: 0.1
   hard_exclude_categories:
@@ -93,7 +100,7 @@ performance:
   enabled: true
   accounts_to_analyze: 30
   ad_reels_target: 5
-  max_reels_to_scan: 30
+  max_reels_to_scan: 50
   only_posts_newer_than: 12 months
   skip_pinned_posts: true
   include_shares_count: false
@@ -109,11 +116,34 @@ scoring:
   - office
   - lifestyle
   weights:
-    visual_similarity: 0.4
-    category_fit: 0.2
+    visual_similarity: 0.3
+    content_similarity: 0.2
+    category_fit: 0.1
     ad_performance: 0.2
     engagement: 0.15
     follower_fit: 0.05
 output:
   sqlite_path: data/influencers.db
-  excel_path: output/candidates_v05.xlsx
+  excel_path: output/candidates_v06.xlsx
+text_similarity:
+  enabled: true
+  model_name: intfloat/multilingual-e5-small
+  recent_posts: 8
+  include_ads: false
+  include_bio: true
+  caption_weight: 0.8
+  hashtag_weight: 0.2
+  batch_size: 16
+  max_length: 512
+  cache_path: cache/text_embeddings.pt
+  stop_hashtags:
+  - 광고
+  - 협찬
+  - 제품제공
+  - 유료광고
+  - 일상
+  - 데일리
+  - 좋아요
+similarity_ranking:
+  visual_weight: 0.6
+  content_weight: 0.4

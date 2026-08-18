@@ -21,6 +21,13 @@ class Candidate:
     pre_score: float = 0.0
     visual_similarity: Optional[float] = None
     visual_rank: Optional[int] = None
+    caption_similarity: Optional[float] = None
+    hashtag_similarity: Optional[float] = None
+    shared_hashtags: str = ""
+    content_similarity: Optional[float] = None
+    text_posts_used: int = 0
+    combined_similarity: Optional[float] = None
+    combined_rank: Optional[int] = None
     score: float = 0.0
     status: str = "candidate"
     reject_reason: str = ""

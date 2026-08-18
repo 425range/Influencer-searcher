@@ -18,6 +18,7 @@ from src.analysis.target_filters import apply_targeting
 from src.analysis.scoring import pre_score, final_score
 from src.analysis.reel_metrics import build_reel_metrics, commercial_reject_reason
 from src.visual.account_ranker import rank_candidates_visual
+from src.textual.account_ranker import rank_candidates_text, rank_candidates_combined
 from src.storage.sqlite_store import SQLiteStore
 from src.exporters.excel_exporter import export
 
@@ -51,6 +52,7 @@ def reject_row(candidate, reason, stage):
 def candidate_row(c, metrics, performance_analyzed, include_hits="", soft_hits=""):
     return {
         "final_rank": None,
+        "combined_rank": c.combined_rank,
         "visual_rank": c.visual_rank,
         "username": c.username,
         "profile_url": c.profile_url,
@@ -65,6 +67,12 @@ def candidate_row(c, metrics, performance_analyzed, include_hits="", soft_hits="
         "seed_similarity_legacy": c.seed_similarity,
         "pre_score": c.pre_score,
         "visual_similarity": c.visual_similarity,
+        "caption_similarity": c.caption_similarity,
+        "hashtag_similarity": c.hashtag_similarity,
+        "shared_hashtags": c.shared_hashtags,
+        "content_similarity": c.content_similarity,
+        "text_posts_used": c.text_posts_used,
+        "combined_similarity": c.combined_similarity,
         "performance_analyzed": performance_analyzed,
         "reels_scanned": metrics.get("reels_scanned") if performance_analyzed else None,
         "requested_ad_reels": metrics.get("requested_ad_reels") if performance_analyzed else None,
@@ -133,7 +141,7 @@ def main(config_path):
     seed_set = {x.lower() for x in seeds}
     rejected_rows = []
 
-    print("[1/9] Candidate discovery")
+    print("[1/11] Candidate discovery")
     seed_candidates = discover_from_seeds(
         client=client,
         seed_usernames=seeds,
@@ -153,7 +161,7 @@ def main(config_path):
     candidates = merge_candidates(seed_candidates, keyword_candidates)
     print(f"  unique candidates: {len(candidates)}")
 
-    print("[2/9] Profile enrichment")
+    print("[2/11] Profile enrichment")
     all_to_scrape = list(dict.fromkeys([c.username for c in candidates] + seeds))
     profile_items = scrape_profiles(client, all_to_scrape)
     item_by_username = {
@@ -176,10 +184,21 @@ def main(config_path):
         profile_posts.extend(user_posts)
         enriched.append(c)
 
-    print("[3/9] Hard filters + category")
+    print("[3/11] Hard filters + category")
+    # Reuse the already-scraped profile captions for both ad exclusion and text similarity.
+    profile_posts = mark_ads(profile_posts, cfg["analysis"]["ad_keywords"])
     profile_posts_by_user = defaultdict(list)
     for p in profile_posts:
         profile_posts_by_user[p.username.lower()].append(p)
+
+    # Seed accounts are not normally kept as candidates, but their captions are
+    # still needed to build the reference content vector. Reuse the same
+    # Profile Scraper response; no additional Apify call is made.
+    for seed in seeds:
+        item = item_by_username.get(seed.lower(), {})
+        seed_posts = posts_from_profile(item) if item else []
+        seed_posts = mark_ads(seed_posts, cfg["analysis"]["ad_keywords"])
+        profile_posts_by_user[seed.lower()] = seed_posts
 
     seed_texts = []
     for seed in seeds:
@@ -237,15 +256,33 @@ def main(config_path):
     candidates = kept
     print(f"  after filters: {len(candidates)}")
 
-    print("[4/9] SigLIP visual ranking")
+    print("[4/11] Caption + hashtag similarity")
+    text_cfg = cfg.get("text_similarity", {})
+    if text_cfg.get("enabled", True) and candidates:
+        candidates = rank_candidates_text(
+            candidates=candidates,
+            item_by_username=item_by_username,
+            posts_by_username=profile_posts_by_user,
+            seed_usernames=seeds,
+            cfg=text_cfg,
+            ad_keywords=cfg["analysis"]["ad_keywords"],
+        )
+    else:
+        print("  text similarity skipped")
+
+    print("[5/11] SigLIP visual similarity")
     if cfg.get("visual", {}).get("enabled", True) and candidates:
         candidates = rank_candidates_visual(candidates, item_by_username, seeds, cfg["visual"])
     else:
-        candidates.sort(key=lambda c: c.pre_score, reverse=True)
-        for rank, c in enumerate(candidates, start=1):
-            c.visual_rank = rank
+        for c in candidates:
+            c.visual_similarity = None
+            c.visual_rank = None
 
-    print("[5/9] Select accounts for Reel performance")
+    print("[6/11] Combined content + visual ranking")
+    if candidates:
+        candidates = rank_candidates_combined(candidates, cfg.get("similarity_ranking", {}))
+
+    print("[7/11] Select accounts for Reel performance")
     pcfg = cfg.get("performance", {})
     performance_enabled = pcfg.get("enabled", True)
     top_n = int(pcfg.get("accounts_to_analyze", 30))
@@ -257,7 +294,7 @@ def main(config_path):
     reel_metrics = {}
     selected_ad_by_user = {}
     if perf_usernames:
-        print("[6/9] Reel tab scraping")
+        print("[8/11] Reel tab scraping")
         reel_items = scrape_reels(
             client=client,
             usernames=perf_usernames,
@@ -273,9 +310,9 @@ def main(config_path):
             ad_target=int(pcfg.get("ad_reels_target", 5)),
         )
     else:
-        print("[6/9] Reel tab scraping skipped")
+        print("[8/11] Reel tab scraping skipped")
 
-    print("[7/9] Commercial filter + final scoring")
+    print("[9/11] Commercial filter + final scoring")
     commercial_cfg = cfg.get("commercial_filter", {})
     final_candidates = []
     for c in candidates:
@@ -296,21 +333,21 @@ def main(config_path):
             )
         final_candidates.append(c)
 
-    # Analyzed candidates first by final score; remaining candidates keep visual order.
+    # Analyzed candidates first by final score; remaining candidates keep combined similarity order.
     analyzed_names = {x.lower() for x in perf_usernames}
     analyzed = [c for c in final_candidates if c.username.lower() in analyzed_names]
     not_analyzed = [c for c in final_candidates if c.username.lower() not in analyzed_names]
     analyzed.sort(key=lambda c: c.score, reverse=True)
-    not_analyzed.sort(key=lambda c: c.visual_rank or 999999)
+    not_analyzed.sort(key=lambda c: c.combined_rank or 999999)
     final_candidates = analyzed + not_analyzed
 
-    print("[8/9] SQLite")
+    print("[10/11] SQLite")
     store = SQLiteStore(cfg["output"]["sqlite_path"])
     store.save_candidates(final_candidates)
     store.save_posts(profile_posts + reels)
     store.close()
 
-    print("[9/9] Excel")
+    print("[11/11] Excel")
     candidate_rows = []
     for idx, c in enumerate(final_candidates, start=1):
         t = target_meta.get(c.username.lower(), {})

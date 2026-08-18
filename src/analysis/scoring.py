@@ -24,6 +24,7 @@ def final_score(candidate, reel_metrics, filters, cfg, soft_exclude_hits=0):
     desired = cfg.get("desired_categories", [])
 
     visual = candidate.visual_similarity if candidate.visual_similarity is not None else 0.0
+    content = candidate.content_similarity if candidate.content_similarity is not None else 0.0
     cfit = category_fit(candidate, desired, soft_exclude_hits)
     ffit = follower_fit(candidate.followers, filters["min_followers"], filters["max_followers"])
 
@@ -32,8 +33,9 @@ def final_score(candidate, reel_metrics, filters, cfg, soft_exclude_hits=0):
     eng = min(max(reel_metrics.get("ad_engagement_rate", 0.0) / 0.08, 0.0), 1.0)
 
     score = (
-        visual * weights.get("visual_similarity", 0.40)
-        + cfit * weights.get("category_fit", 0.20)
+        visual * weights.get("visual_similarity", 0.30)
+        + content * weights.get("content_similarity", 0.20)
+        + cfit * weights.get("category_fit", 0.10)
         + ad_perf * weights.get("ad_performance", 0.20)
         + eng * weights.get("engagement", 0.15)
         + ffit * weights.get("follower_fit", 0.05)

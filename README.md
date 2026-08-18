@@ -1,3 +1,7 @@
+# v0.6 GUI + Content Similarity
+
+이번 버전은 기존 SigLIP Visual Similarity에 Caption/Hashtag Content Similarity를 추가합니다. 자세한 내용은 `README_V06.md`를 참고하세요.
+
 # Influencer Discovery PoC v0.2
 
 이번 버전은 v0.1의 두 가지 핵심 문제를 수정합니다.
