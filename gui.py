@@ -60,9 +60,33 @@ class ScrollText(tk.Text):
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Influencer Discovery PoC v0.5")
-        self.geometry("1040x840")
-        self.minsize(920, 720)
+        self.title("Influencer Discovery PoC v0.5.1")
+        self.geometry("1120x880")
+        self.minsize(980, 760)
+
+        # -----------------------------
+        # Visual theme
+        # -----------------------------
+        self.COLORS = {
+            "bg": "#F3F6FA",
+            "card": "#FFFFFF",
+            "header": "#172554",
+            "primary": "#2563EB",
+            "primary_hover": "#1D4ED8",
+            "success": "#059669",
+            "success_hover": "#047857",
+            "danger_soft": "#FFF1F2",
+            "warning_soft": "#FFF7ED",
+            "info_soft": "#EFF6FF",
+            "input": "#FFFFFF",
+            "border": "#CBD5E1",
+            "text": "#111827",
+            "muted": "#64748B",
+            "log_bg": "#0F172A",
+            "log_fg": "#E2E8F0",
+        }
+        self.configure(bg=self.COLORS["bg"])
+        self._setup_styles()
 
         self.config_path = DEFAULT_CONFIG
         self.cfg = {}
@@ -73,23 +97,202 @@ class App(tk.Tk):
         self.load_config(self.config_path)
         self.after(100, self._drain_log_queue)
 
+    def _setup_styles(self):
+        c = self.COLORS
+        style = ttk.Style(self)
+
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
+
+        style.configure(
+            ".",
+            font=("Segoe UI", 10),
+            background=c["bg"],
+            foreground=c["text"],
+        )
+
+        style.configure("App.TFrame", background=c["bg"])
+        style.configure("Card.TFrame", background=c["card"])
+        style.configure(
+            "Card.TLabelframe",
+            background=c["card"],
+            bordercolor=c["border"],
+            relief="solid",
+            borderwidth=1,
+        )
+        style.configure(
+            "Card.TLabelframe.Label",
+            background=c["card"],
+            foreground=c["text"],
+            font=("Segoe UI", 10, "bold"),
+        )
+
+        style.configure(
+            "TLabel",
+            background=c["bg"],
+            foreground=c["text"],
+        )
+        style.configure(
+            "Card.TLabel",
+            background=c["card"],
+            foreground=c["text"],
+        )
+        style.configure(
+            "Muted.Card.TLabel",
+            background=c["card"],
+            foreground=c["muted"],
+        )
+        style.configure(
+            "Section.Card.TLabel",
+            background=c["card"],
+            foreground=c["header"],
+            font=("Segoe UI", 11, "bold"),
+        )
+
+        style.configure(
+            "TEntry",
+            fieldbackground=c["input"],
+            foreground=c["text"],
+            insertcolor=c["text"],
+            bordercolor=c["border"],
+            lightcolor=c["border"],
+            darkcolor=c["border"],
+            padding=(8, 6),
+        )
+        style.map(
+            "TEntry",
+            bordercolor=[("focus", c["primary"])],
+            lightcolor=[("focus", c["primary"])],
+            darkcolor=[("focus", c["primary"])],
+        )
+
+        style.configure(
+            "Primary.TButton",
+            background=c["primary"],
+            foreground="#FFFFFF",
+            bordercolor=c["primary"],
+            padding=(14, 8),
+            font=("Segoe UI", 10, "bold"),
+        )
+        style.map(
+            "Primary.TButton",
+            background=[
+                ("active", c["primary_hover"]),
+                ("pressed", c["primary_hover"]),
+                ("disabled", "#93C5FD"),
+            ],
+            foreground=[("disabled", "#EFF6FF")],
+        )
+
+        style.configure(
+            "Success.TButton",
+            background=c["success"],
+            foreground="#FFFFFF",
+            bordercolor=c["success"],
+            padding=(12, 7),
+            font=("Segoe UI", 10, "bold"),
+        )
+        style.map(
+            "Success.TButton",
+            background=[("active", c["success_hover"]), ("pressed", c["success_hover"])],
+        )
+
+        style.configure(
+            "Secondary.TButton",
+            background="#FFFFFF",
+            foreground=c["text"],
+            bordercolor=c["border"],
+            padding=(11, 7),
+        )
+        style.map(
+            "Secondary.TButton",
+            background=[("active", "#F8FAFC"), ("pressed", "#E2E8F0")],
+            bordercolor=[("active", "#94A3B8")],
+        )
+
+        style.configure(
+            "TCheckbutton",
+            background=c["card"],
+            foreground=c["text"],
+        )
+
+        style.configure(
+            "TNotebook",
+            background=c["bg"],
+            borderwidth=0,
+            tabmargins=(0, 4, 0, 0),
+        )
+        style.configure(
+            "TNotebook.Tab",
+            background="#E2E8F0",
+            foreground="#475569",
+            padding=(15, 9),
+            font=("Segoe UI", 10, "bold"),
+        )
+        style.map(
+            "TNotebook.Tab",
+            background=[("selected", "#FFFFFF"), ("active", "#DBEAFE")],
+            foreground=[("selected", c["primary"]), ("active", c["header"])],
+        )
+
+        style.configure(
+            "Status.TLabel",
+            background=c["info_soft"],
+            foreground=c["header"],
+            padding=(10, 5),
+            font=("Segoe UI", 9, "bold"),
+        )
+
     def _build_ui(self):
-        top = ttk.Frame(self, padding=(12, 10))
-        top.pack(fill="x")
+        c = self.COLORS
 
-        ttk.Label(top, text="Influencer Discovery", font=("Segoe UI", 18, "bold")).pack(side="left")
-        ttk.Label(top, text="  v0.5 GUI", font=("Segoe UI", 11)).pack(side="left", pady=(5, 0))
+        # Header
+        header = tk.Frame(self, bg=c["header"], height=74)
+        header.pack(fill="x")
+        header.pack_propagate(False)
 
-        ttk.Button(top, text="설정 불러오기", command=self.choose_config).pack(side="right", padx=4)
-        ttk.Button(top, text="설정 저장", command=self.save_config).pack(side="right", padx=4)
+        title_box = tk.Frame(header, bg=c["header"])
+        title_box.pack(side="left", padx=20, pady=13)
+        tk.Label(
+            title_box,
+            text="Influencer Discovery",
+            bg=c["header"],
+            fg="#FFFFFF",
+            font=("Segoe UI", 20, "bold"),
+        ).pack(side="left")
+        tk.Label(
+            title_box,
+            text="  v0.5.1 GUI",
+            bg=c["header"],
+            fg="#BFDBFE",
+            font=("Segoe UI", 10, "bold"),
+        ).pack(side="left", pady=(7, 0))
 
+        header_actions = tk.Frame(header, bg=c["header"])
+        header_actions.pack(side="right", padx=16, pady=16)
+        ttk.Button(
+            header_actions,
+            text="설정 불러오기",
+            style="Secondary.TButton",
+            command=self.choose_config,
+        ).pack(side="right", padx=4)
+        ttk.Button(
+            header_actions,
+            text="설정 저장",
+            style="Secondary.TButton",
+            command=self.save_config,
+        ).pack(side="right", padx=4)
+
+        # Tabs
         self.notebook = ttk.Notebook(self)
-        self.notebook.pack(fill="both", expand=True, padx=12, pady=(0, 8))
+        self.notebook.pack(fill="both", expand=True, padx=16, pady=(14, 8))
 
-        self.tab_campaign = ttk.Frame(self.notebook, padding=14)
-        self.tab_target = ttk.Frame(self.notebook, padding=14)
-        self.tab_visual = ttk.Frame(self.notebook, padding=14)
-        self.tab_performance = ttk.Frame(self.notebook, padding=14)
+        self.tab_campaign = ttk.Frame(self.notebook, padding=18, style="Card.TFrame")
+        self.tab_target = ttk.Frame(self.notebook, padding=18, style="Card.TFrame")
+        self.tab_visual = ttk.Frame(self.notebook, padding=18, style="Card.TFrame")
+        self.tab_performance = ttk.Frame(self.notebook, padding=18, style="Card.TFrame")
 
         self.notebook.add(self.tab_campaign, text="캠페인 / Discovery")
         self.notebook.add(self.tab_target, text="타겟 / 제외")
@@ -101,40 +304,127 @@ class App(tk.Tk):
         self._build_visual_tab()
         self._build_performance_tab()
 
-        action = ttk.Frame(self, padding=(12, 4))
+        # Bottom actions
+        action_outer = tk.Frame(self, bg=c["bg"])
+        action_outer.pack(fill="x", padx=16, pady=(0, 8))
+
+        action = ttk.Frame(action_outer, padding=(12, 10), style="Card.TFrame")
         action.pack(fill="x")
 
-        self.run_button = ttk.Button(action, text="분석 시작", command=self.start_analysis)
+        self.run_button = ttk.Button(
+            action,
+            text="▶  분석 시작",
+            style="Primary.TButton",
+            command=self.start_analysis,
+        )
         self.run_button.pack(side="left")
-        ttk.Button(action, text="결과 Excel 열기", command=self.open_excel).pack(side="left", padx=6)
-        ttk.Button(action, text="결과 폴더 열기", command=self.open_output_folder).pack(side="left")
+
+        ttk.Button(
+            action,
+            text="결과 Excel 열기",
+            style="Success.TButton",
+            command=self.open_excel,
+        ).pack(side="left", padx=(10, 6))
+
+        ttk.Button(
+            action,
+            text="결과 폴더 열기",
+            style="Secondary.TButton",
+            command=self.open_output_folder,
+        ).pack(side="left")
 
         self.status_var = tk.StringVar(value="준비")
-        ttk.Label(action, textvariable=self.status_var).pack(side="right")
+        ttk.Label(
+            action,
+            textvariable=self.status_var,
+            style="Status.TLabel",
+        ).pack(side="right")
 
-        log_frame = ttk.LabelFrame(self, text="실행 로그", padding=8)
-        log_frame.pack(fill="both", expand=False, padx=12, pady=(2, 12))
+        # Log
+        log_outer = tk.Frame(self, bg=c["bg"])
+        log_outer.pack(fill="both", expand=False, padx=16, pady=(0, 14))
 
-        self.log = tk.Text(log_frame, height=13, wrap="word", state="disabled")
+        log_frame = ttk.LabelFrame(
+            log_outer,
+            text="실행 로그",
+            padding=8,
+            style="Card.TLabelframe",
+        )
+        log_frame.pack(fill="both")
+
+        self.log = tk.Text(
+            log_frame,
+            height=12,
+            wrap="word",
+            state="disabled",
+            bg=c["log_bg"],
+            fg=c["log_fg"],
+            insertbackground="#FFFFFF",
+            selectbackground="#334155",
+            relief="flat",
+            padx=10,
+            pady=10,
+            font=("Consolas", 9),
+        )
         scrollbar = ttk.Scrollbar(log_frame, orient="vertical", command=self.log.yview)
         self.log.configure(yscrollcommand=scrollbar.set)
         self.log.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
     def _entry(self, parent, row, label, var, width=28, help_text=None):
-        ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=5, padx=(0, 12))
+        ttk.Label(parent, text=label, style="Card.TLabel").grid(
+            row=row, column=0, sticky="w", pady=7, padx=(0, 14)
+        )
         ent = ttk.Entry(parent, textvariable=var, width=width)
-        ent.grid(row=row, column=1, sticky="ew", pady=5)
+        ent.grid(row=row, column=1, sticky="ew", pady=7, ipady=1)
         if help_text:
-            ttk.Label(parent, text=help_text, foreground="#666").grid(row=row, column=2, sticky="w", padx=10)
+            ttk.Label(
+                parent,
+                text=help_text,
+                style="Muted.Card.TLabel",
+                wraplength=300,
+            ).grid(row=row, column=2, sticky="w", padx=12)
         return ent
 
-    def _text_area(self, parent, row, label, height=5, help_text=None):
-        ttk.Label(parent, text=label).grid(row=row, column=0, sticky="nw", pady=6, padx=(0, 12))
-        txt = tk.Text(parent, height=height, width=44, wrap="word")
-        txt.grid(row=row, column=1, sticky="nsew", pady=6)
+    def _text_area(self, parent, row, label, height=5, help_text=None, tone="normal"):
+        ttk.Label(parent, text=label, style="Card.TLabel").grid(
+            row=row, column=0, sticky="nw", pady=7, padx=(0, 14)
+        )
+
+        bg = self.COLORS["input"]
+        if tone == "danger":
+            bg = self.COLORS["danger_soft"]
+        elif tone == "warning":
+            bg = self.COLORS["warning_soft"]
+        elif tone == "info":
+            bg = self.COLORS["info_soft"]
+
+        txt = tk.Text(
+            parent,
+            height=height,
+            width=44,
+            wrap="word",
+            bg=bg,
+            fg=self.COLORS["text"],
+            insertbackground=self.COLORS["text"],
+            relief="solid",
+            borderwidth=1,
+            highlightthickness=1,
+            highlightbackground=self.COLORS["border"],
+            highlightcolor=self.COLORS["primary"],
+            padx=8,
+            pady=7,
+            font=("Segoe UI", 10),
+        )
+        txt.grid(row=row, column=1, sticky="nsew", pady=7)
+
         if help_text:
-            ttk.Label(parent, text=help_text, foreground="#666", wraplength=290).grid(row=row, column=2, sticky="nw", padx=10, pady=6)
+            ttk.Label(
+                parent,
+                text=help_text,
+                style="Muted.Card.TLabel",
+                wraplength=300,
+            ).grid(row=row, column=2, sticky="nw", padx=12, pady=8)
         return txt
 
     def _build_campaign_tab(self):
@@ -154,9 +444,9 @@ class App(tk.Tk):
         self._entry(f, r, "캠페인명", self.campaign_name); r += 1
         self._entry(f, r, "제품 / 브랜드", self.product); r += 1
         self.seed_usernames = self._text_area(f, r, "레퍼런스 계정", 4, "한 줄에 하나씩 Instagram username 입력"); r += 1
-        self.search_queries = self._text_area(f, r, "검색어", 5, "키워드 검색을 사용할 때의 검색 문구"); r += 1
+        self.search_queries = self._text_area(f, r, "검색어", 5, "구글 키워드 검색을 사용할 때의 검색 문구"); r += 1
 
-        ttk.Checkbutton(f, text="키워드 검색 사용", variable=self.use_keyword_search).grid(row=r, column=1, sticky="w", pady=5); r += 1
+        ttk.Checkbutton(f, text="키워드 검색 사용", variable=self.use_keyword_search, style="TCheckbutton").grid(row=r, column=1, sticky="w", pady=5); r += 1
         self._entry(f, r, "최소 팔로워", self.min_followers, help_text="예: 30000"); r += 1
         self._entry(f, r, "최대 팔로워", self.max_followers, help_text="예: 500000"); r += 1
         self._entry(f, r, "추천 확장 Depth", self.seed_depth, help_text="1=직접 추천, 2=추천의 추천"); r += 1
@@ -167,9 +457,9 @@ class App(tk.Tk):
         f = self.tab_target
         f.columnconfigure(1, weight=1)
 
-        self.include_keywords = self._text_area(f, 0, "포함 키워드", 6, "카테고리 적합도 및 후보 평가에 사용")
-        self.hard_exclude_keywords = self._text_area(f, 1, "Hard 제외 키워드", 6, "매칭 시 후보에서 즉시 제외")
-        self.soft_exclude_keywords = self._text_area(f, 2, "Soft 제외 키워드", 5, "후보는 유지하지만 점수 감점")
+        self.include_keywords = self._text_area(f, 0, "포함 키워드", 6, "카테고리 적합도 및 후보 평가에 사용", tone="info")
+        self.hard_exclude_keywords = self._text_area(f, 1, "Hard 제외 키워드", 6, "매칭 시 후보에서 즉시 제외", tone="danger")
+        self.soft_exclude_keywords = self._text_area(f, 2, "Soft 제외 키워드", 5, "후보는 유지하지만 점수 감점", tone="warning")
 
         self.soft_penalty = tk.StringVar()
         self.hard_category_threshold = tk.StringVar()
@@ -197,7 +487,7 @@ class App(tk.Tk):
             "Visual 분석은 기존 Profile Scraper에서 확보한 최근 게시물 대표 이미지를 사용합니다. "
             "Carousel은 게시물당 대표 이미지 1장만 사용합니다."
         )
-        ttk.Label(f, text=note, foreground="#555", wraplength=700).grid(row=5, column=0, columnspan=3, sticky="w", pady=(18, 0))
+        ttk.Label(f, text=note, style="Muted.Card.TLabel", wraplength=700).grid(row=5, column=0, columnspan=3, sticky="w", pady=(18, 0))
 
     def _build_performance_tab(self):
         f = self.tab_performance
@@ -224,7 +514,7 @@ class App(tk.Tk):
         ttk.Checkbutton(f, text="공유 수 요청", variable=self.include_shares_count).grid(row=5, column=1, sticky="w", pady=5)
 
         ttk.Separator(f).grid(row=6, column=0, columnspan=3, sticky="ew", pady=14)
-        ttk.Label(f, text="광고주 Commercial Filter", font=("Segoe UI", 10, "bold")).grid(row=7, column=0, columnspan=2, sticky="w")
+        ttk.Label(f, text="광고주 Commercial Filter", style="Section.Card.TLabel").grid(row=7, column=0, columnspan=2, sticky="w")
         self._entry(f, 8, "최소 광고 Reel", self.min_ad_reels, help_text="빈칸 = 제한 없음")
         self._entry(f, 9, "탐색 범위 내 광고 최대", self.max_ad_reels, help_text="빈칸 = 제한 없음")
         self._entry(f, 10, "최대 광고 비율", self.max_ad_ratio, help_text="예: 0.5 = 50%, 빈칸 = 제한 없음")
