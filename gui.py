@@ -60,8 +60,8 @@ class ScrollText(tk.Text):
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Influencer Discovery PoC v0.6")
-        self.geometry("1120x880")
+        self.title("Influencer Discovery PoC v0.7.2")
+        self.geometry("1120x900")
         self.minsize(980, 760)
 
         # -----------------------------
@@ -250,7 +250,7 @@ class App(tk.Tk):
 
         # Header
         header = tk.Frame(self, bg=c["header"], height=74)
-        header.pack(fill="x")
+        header.pack(side="top", fill="x")
         header.pack_propagate(False)
 
         title_box = tk.Frame(header, bg=c["header"])
@@ -264,7 +264,7 @@ class App(tk.Tk):
         ).pack(side="left")
         tk.Label(
             title_box,
-            text="  v0.6 GUI",
+            text="  v0.7.2 GUI",
             bg=c["header"],
             fg="#BFDBFE",
             font=("Segoe UI", 10, "bold"),
@@ -285,34 +285,17 @@ class App(tk.Tk):
             command=self.save_config,
         ).pack(side="right", padx=4)
 
-        # Tabs
-        self.notebook = ttk.Notebook(self)
-        self.notebook.pack(fill="both", expand=True, padx=16, pady=(14, 8))
+        # ----------------------------------------------------------
+        # Bottom area is packed BEFORE the notebook.
+        # This guarantees that Run / Result buttons and the log
+        # remain visible even when a tab contains many settings.
+        # ----------------------------------------------------------
+        bottom = tk.Frame(self, bg=c["bg"])
+        bottom.pack(side="bottom", fill="x", padx=16, pady=(0, 12))
 
-        self.tab_campaign = ttk.Frame(self.notebook, padding=18, style="Card.TFrame")
-        self.tab_target = ttk.Frame(self.notebook, padding=18, style="Card.TFrame")
-        self.tab_content = ttk.Frame(self.notebook, padding=18, style="Card.TFrame")
-        self.tab_visual = ttk.Frame(self.notebook, padding=18, style="Card.TFrame")
-        self.tab_performance = ttk.Frame(self.notebook, padding=18, style="Card.TFrame")
-
-        self.notebook.add(self.tab_campaign, text="캠페인 / Discovery")
-        self.notebook.add(self.tab_target, text="타겟 / 제외")
-        self.notebook.add(self.tab_content, text="Content 유사도")
-        self.notebook.add(self.tab_visual, text="Visual")
-        self.notebook.add(self.tab_performance, text="Reel / 광고 성과")
-
-        self._build_campaign_tab()
-        self._build_target_tab()
-        self._build_content_tab()
-        self._build_visual_tab()
-        self._build_performance_tab()
-
-        # Bottom actions
-        action_outer = tk.Frame(self, bg=c["bg"])
-        action_outer.pack(fill="x", padx=16, pady=(0, 8))
-
-        action = ttk.Frame(action_outer, padding=(12, 10), style="Card.TFrame")
-        action.pack(fill="x")
+        # Actions
+        action = ttk.Frame(bottom, padding=(12, 9), style="Card.TFrame")
+        action.pack(fill="x", pady=(6, 8))
 
         self.run_button = ttk.Button(
             action,
@@ -344,11 +327,8 @@ class App(tk.Tk):
         ).pack(side="right")
 
         # Log
-        log_outer = tk.Frame(self, bg=c["bg"])
-        log_outer.pack(fill="both", expand=False, padx=16, pady=(0, 14))
-
         log_frame = ttk.LabelFrame(
-            log_outer,
+            bottom,
             text="실행 로그",
             padding=8,
             style="Card.TLabelframe",
@@ -357,7 +337,7 @@ class App(tk.Tk):
 
         self.log = tk.Text(
             log_frame,
-            height=12,
+            height=9,
             wrap="word",
             state="disabled",
             bg=c["log_bg"],
@@ -366,13 +346,103 @@ class App(tk.Tk):
             selectbackground="#334155",
             relief="flat",
             padx=10,
-            pady=10,
+            pady=8,
             font=("Consolas", 9),
         )
         scrollbar = ttk.Scrollbar(log_frame, orient="vertical", command=self.log.yview)
         self.log.configure(yscrollcommand=scrollbar.set)
         self.log.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
+
+        # Tabs take only the remaining center area.
+        self.notebook = ttk.Notebook(self)
+        self.notebook.pack(
+            side="top",
+            fill="both",
+            expand=True,
+            padx=16,
+            pady=(14, 2),
+        )
+
+        self.tab_campaign_outer = ttk.Frame(self.notebook, style="Card.TFrame")
+        self.tab_target_outer = ttk.Frame(self.notebook, style="Card.TFrame")
+        self.tab_content_outer = ttk.Frame(self.notebook, style="Card.TFrame")
+        self.tab_visual_outer = ttk.Frame(self.notebook, style="Card.TFrame")
+        self.tab_performance_outer = ttk.Frame(self.notebook, style="Card.TFrame")
+
+        self.notebook.add(self.tab_campaign_outer, text="캠페인 / Discovery")
+        self.notebook.add(self.tab_target_outer, text="타겟 / 제외")
+        self.notebook.add(self.tab_content_outer, text="Content 유사도")
+        self.notebook.add(self.tab_visual_outer, text="Visual")
+        self.notebook.add(self.tab_performance_outer, text="Reel / 광고 성과")
+
+        self.tab_campaign = self._make_scrollable_tab(self.tab_campaign_outer)
+        self.tab_target = self._make_scrollable_tab(self.tab_target_outer)
+        self.tab_content = self._make_scrollable_tab(self.tab_content_outer)
+        self.tab_visual = self._make_scrollable_tab(self.tab_visual_outer)
+        self.tab_performance = self._make_scrollable_tab(self.tab_performance_outer)
+
+        self._build_campaign_tab()
+        self._build_target_tab()
+        self._build_content_tab()
+        self._build_visual_tab()
+        self._build_performance_tab()
+
+
+    def _make_scrollable_tab(self, parent):
+        """
+        Return an inner ttk.Frame placed inside a vertically scrollable canvas.
+        Mouse wheel scrolling works while the pointer is over the tab.
+        """
+        c = self.COLORS
+
+        container = ttk.Frame(parent, style="Card.TFrame")
+        container.pack(fill="both", expand=True)
+
+        canvas = tk.Canvas(
+            container,
+            bg=c["card"],
+            highlightthickness=0,
+            borderwidth=0,
+        )
+        scrollbar = ttk.Scrollbar(
+            container,
+            orient="vertical",
+            command=canvas.yview,
+        )
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        scrollbar.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+
+        inner = ttk.Frame(canvas, padding=18, style="Card.TFrame")
+        window_id = canvas.create_window((0, 0), window=inner, anchor="nw")
+
+        def _update_scrollregion(_event=None):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def _fit_width(event):
+            canvas.itemconfigure(window_id, width=event.width)
+
+        inner.bind("<Configure>", _update_scrollregion)
+        canvas.bind("<Configure>", _fit_width)
+
+        def _on_mousewheel(event):
+            if event.delta:
+                canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        def _bind_mousewheel(_event):
+            canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        def _unbind_mousewheel(_event):
+            canvas.unbind_all("<MouseWheel>")
+
+        canvas.bind("<Enter>", _bind_mousewheel)
+        canvas.bind("<Leave>", _unbind_mousewheel)
+        inner.bind("<Enter>", _bind_mousewheel)
+        inner.bind("<Leave>", _unbind_mousewheel)
+
+        return inner
 
     def _entry(self, parent, row, label, var, width=28, help_text=None):
         ttk.Label(parent, text=label, style="Card.TLabel").grid(
@@ -466,9 +536,27 @@ class App(tk.Tk):
 
         self.soft_penalty = tk.StringVar()
         self.hard_category_threshold = tk.StringVar()
+        self.gender_target_display = tk.StringVar(value="전체")
         self._entry(f, 3, "Soft 제외 감점", self.soft_penalty, help_text="0~1, 예: 0.10")
         self.hard_exclude_categories = self._text_area(f, 4, "Hard 제외 카테고리", 4, "예: parenting")
         self._entry(f, 5, "카테고리 제외 기준", self.hard_category_threshold, help_text="예: 0.20")
+
+        ttk.Separator(f).grid(row=6, column=0, columnspan=3, sticky="ew", pady=14)
+        ttk.Label(f, text="크리에이터 성별 필터", style="Section.Card.TLabel").grid(row=7, column=0, sticky="w", pady=7, padx=(0, 14))
+        self.gender_combo = ttk.Combobox(
+            f,
+            textvariable=self.gender_target_display,
+            values=["전체", "여성 중심", "남성 중심"],
+            state="readonly",
+            width=22,
+        )
+        self.gender_combo.grid(row=7, column=1, sticky="w", pady=7)
+        ttk.Label(
+            f,
+            text="Bio/Caption의 명시적 자기소개 신호만 사용합니다. 애매한 계정은 유지합니다.",
+            style="Muted.Card.TLabel",
+            wraplength=320,
+        ).grid(row=7, column=2, sticky="w", padx=12)
 
     def _build_content_tab(self):
         f = self.tab_content
@@ -483,8 +571,12 @@ class App(tk.Tk):
         self.hashtag_weight = tk.StringVar()
         self.text_batch_size = tk.StringVar()
         self.stop_hashtags = None
-        self.visual_similarity_weight = tk.StringVar()
-        self.content_similarity_weight = tk.StringVar()
+        self.reference_top_k = tk.StringVar()
+        self.rank_visual_weight = tk.StringVar()
+        self.rank_caption_weight = tk.StringVar()
+        self.rank_hashtag_weight = tk.StringVar()
+        self.rank_graph_weight = tk.StringVar()
+        self.min_combined_similarity = tk.StringVar()
 
         ttk.Checkbutton(f, text="Caption / Hashtag 유사도 분석 사용", variable=self.text_enabled).grid(row=0, column=1, sticky="w", pady=7)
         self._entry(f, 1, "Text 모델", self.text_model, width=42, help_text="로컬 다국어 임베딩 모델")
@@ -497,15 +589,19 @@ class App(tk.Tk):
         self.stop_hashtags = self._text_area(f, 8, "무시할 Hashtag", 5, "# 없이 입력. 광고/범용 태그를 비교에서 제외", tone="warning")
 
         ttk.Separator(f).grid(row=9, column=0, columnspan=3, sticky="ew", pady=14)
-        ttk.Label(f, text="Visual + Content 통합 랭킹", style="Section.Card.TLabel").grid(row=10, column=0, columnspan=2, sticky="w")
-        self._entry(f, 11, "Visual 가중치", self.visual_similarity_weight, help_text="예: 0.6")
-        self._entry(f, 12, "Content 가중치", self.content_similarity_weight, help_text="예: 0.4")
+        ttk.Label(f, text="Reference Set + Dynamic Ranking", style="Section.Card.TLabel").grid(row=10, column=0, columnspan=2, sticky="w")
+        self._entry(f, 11, "가까운 Reference Top K", self.reference_top_k, help_text="예: 2 → 여러 레퍼런스 중 가장 가까운 2명 평균")
+        self._entry(f, 12, "Visual 가중치", self.rank_visual_weight, help_text="기본 0.55")
+        self._entry(f, 13, "Caption 가중치", self.rank_caption_weight, help_text="캡션 없으면 자동 제외 후 재정규화")
+        self._entry(f, 14, "Hashtag 가중치", self.rank_hashtag_weight)
+        self._entry(f, 15, "Graph 가중치", self.rank_graph_weight, help_text="여러 Reference 추천망에 겹쳐 등장할수록 상승")
+        self._entry(f, 16, "최소 통합 유사도", self.min_combined_similarity, help_text="빈칸=제한 없음. 낮은 후보를 억지로 채우지 않음")
 
         note = (
-            "Caption은 의미 임베딩으로 비교하고 Hashtag는 별도 집합 유사도로 계산합니다. "
-            "추가 Instagram 크롤링 없이 이미 확보한 latestPosts를 재사용합니다."
+            "v0.7은 여러 Reference의 평균 하나를 만들지 않고, 후보별로 가장 가까운 Reference들을 비교합니다. "
+            "Caption이 없는 계정은 Caption=0으로 처리하지 않고 Visual/Hashtag/Graph 가중치를 자동 재분배합니다."
         )
-        ttk.Label(f, text=note, style="Muted.Card.TLabel", wraplength=760).grid(row=13, column=0, columnspan=3, sticky="w", pady=(18, 0))
+        ttk.Label(f, text=note, style="Muted.Card.TLabel", wraplength=760).grid(row=17, column=0, columnspan=3, sticky="w", pady=(18, 0))
 
     def _build_visual_tab(self):
         f = self.tab_visual
@@ -591,6 +687,7 @@ class App(tk.Tk):
         t = c.get("targeting", {})
         txt = c.get("text_similarity", {})
         sim = c.get("similarity_ranking", {})
+        ref = c.get("reference_matching", {})
         v = c.get("visual", {})
         p = c.get("performance", {})
         cf = c.get("commercial_filter", {})
@@ -612,6 +709,9 @@ class App(tk.Tk):
         self.soft_penalty.set(str(t.get("soft_exclude_penalty", 0.10)))
         self._set_text(self.hard_exclude_categories, join_list(t.get("hard_exclude_categories", [])))
         self.hard_category_threshold.set(str(t.get("hard_exclude_category_threshold", 0.20)))
+        gender_cfg = t.get("gender_filter", {}) or {}
+        gender_target = str(gender_cfg.get("target", "all") or "all").lower()
+        self.gender_target_display.set({"female": "여성 중심", "male": "남성 중심"}.get(gender_target, "전체"))
 
         self.text_enabled.set(bool(txt.get("enabled", True)))
         self.text_model.set(txt.get("model_name", "intfloat/multilingual-e5-small"))
@@ -622,8 +722,16 @@ class App(tk.Tk):
         self.hashtag_weight.set(str(txt.get("hashtag_weight", 0.2)))
         self.text_batch_size.set(str(txt.get("batch_size", 16)))
         self._set_text(self.stop_hashtags, join_list(txt.get("stop_hashtags", [])))
-        self.visual_similarity_weight.set(str(sim.get("visual_weight", 0.6)))
-        self.content_similarity_weight.set(str(sim.get("content_weight", 0.4)))
+        rank_weights = sim.get("weights", {}) or {}
+        self.reference_top_k.set(str(ref.get("top_k_references", 2)))
+        self.rank_visual_weight.set(str(rank_weights.get("visual", 0.55)))
+        self.rank_caption_weight.set(str(rank_weights.get("caption", 0.25)))
+        self.rank_hashtag_weight.set(str(rank_weights.get("hashtag", 0.10)))
+        self.rank_graph_weight.set(str(rank_weights.get("graph", 0.10)))
+        self.min_combined_similarity.set(
+            "" if sim.get("min_combined_similarity") is None
+            else str(sim.get("min_combined_similarity"))
+        )
 
         self.visual_enabled.set(bool(v.get("enabled", True)))
         self.visual_model.set(v.get("model_name", "google/siglip2-base-patch16-224"))
@@ -651,6 +759,7 @@ class App(tk.Tk):
         c.setdefault("targeting", {})
         c.setdefault("text_similarity", {})
         c.setdefault("similarity_ranking", {})
+        c.setdefault("reference_matching", {})
         c.setdefault("visual", {})
         c.setdefault("performance", {})
         c.setdefault("commercial_filter", {})
@@ -677,6 +786,15 @@ class App(tk.Tk):
         t["soft_exclude_penalty"] = float(self.soft_penalty.get())
         t["hard_exclude_categories"] = split_list(self.hard_exclude_categories.get("1.0", "end"))
         t["hard_exclude_category_threshold"] = float(self.hard_category_threshold.get())
+        gender_map = {"전체": "all", "여성 중심": "female", "남성 중심": "male"}
+        gender_target = gender_map.get(self.gender_target_display.get(), "all")
+        gender_cfg = t.setdefault("gender_filter", {})
+        gender_cfg["enabled"] = gender_target != "all"
+        gender_cfg["target"] = gender_target
+        gender_cfg.setdefault("bio_weight", 3.0)
+        gender_cfg.setdefault("caption_weight", 1.0)
+        gender_cfg.setdefault("reject_threshold", 3.0)
+        gender_cfg.setdefault("opposite_margin", 2.0)
 
         txt = c["text_similarity"]
         txt["enabled"] = bool(self.text_enabled.get())
@@ -691,9 +809,17 @@ class App(tk.Tk):
         txt.setdefault("cache_path", "cache/text_embeddings.pt")
         txt["stop_hashtags"] = [x.lstrip("#") for x in split_list(self.stop_hashtags.get("1.0", "end"))]
 
+        ref = c["reference_matching"]
+        ref["top_k_references"] = int(self.reference_top_k.get())
+
         sim = c["similarity_ranking"]
-        sim["visual_weight"] = float(self.visual_similarity_weight.get())
-        sim["content_weight"] = float(self.content_similarity_weight.get())
+        sim["weights"] = {
+            "visual": float(self.rank_visual_weight.get()),
+            "caption": float(self.rank_caption_weight.get()),
+            "hashtag": float(self.rank_hashtag_weight.get()),
+            "graph": float(self.rank_graph_weight.get()),
+        }
+        sim["min_combined_similarity"] = parse_optional_float(self.min_combined_similarity.get())
 
         v = c["visual"]
         v["enabled"] = bool(self.visual_enabled.get())
@@ -725,8 +851,13 @@ class App(tk.Tk):
             raise ValueError("Content 비교 게시물 수는 1 이상이어야 합니다.")
         if txt["caption_weight"] < 0 or txt["hashtag_weight"] < 0 or (txt["caption_weight"] + txt["hashtag_weight"]) <= 0:
             raise ValueError("Caption/Hashtag 가중치를 확인하세요.")
-        if sim["visual_weight"] < 0 or sim["content_weight"] < 0 or (sim["visual_weight"] + sim["content_weight"]) <= 0:
-            raise ValueError("Visual/Content 통합 가중치를 확인하세요.")
+        if ref["top_k_references"] < 1:
+            raise ValueError("Reference Top K는 1 이상이어야 합니다.")
+        rank_weights = sim["weights"]
+        if any(v < 0 for v in rank_weights.values()) or sum(rank_weights.values()) <= 0:
+            raise ValueError("통합 랭킹 가중치를 확인하세요.")
+        if sim["min_combined_similarity"] is not None and not 0 <= sim["min_combined_similarity"] <= 1:
+            raise ValueError("최소 통합 유사도는 0~1 사이 값이어야 합니다.")
         if p["ad_reels_target"] < 1:
             raise ValueError("최근 광고 Reel N개는 1 이상이어야 합니다.")
         if p["max_reels_to_scan"] < p["ad_reels_target"]:

@@ -1,44 +1,135 @@
+from __future__ import annotations
+
+import statistics
 import torch
-from src.visual.core import extract_image_urls, load_image, SigLIP2Encoder, account_embedding, seed_embedding, cosine_similarity
+import torch.nn.functional as F
+
+from src.visual.core import extract_image_urls, load_image, SigLIP2Encoder
 
 
-def rank_candidates_visual(candidates, item_by_username, seed_usernames, cfg):
+def _aggregate_topk(values: list[float], top_k: int) -> float | None:
+    values = sorted([float(x) for x in values if x is not None], reverse=True)
+    if not values:
+        return None
+    k = max(1, min(int(top_k), len(values)))
+    return sum(values[:k]) / k
+
+
+def _account_embedding(image_embeddings: torch.Tensor) -> torch.Tensor | None:
+    if image_embeddings is None or image_embeddings.numel() == 0:
+        return None
+    return F.normalize(image_embeddings.mean(dim=0, keepdim=True), p=2, dim=-1)
+
+
+def _cos(a, b) -> float | None:
+    if a is None or b is None:
+        return None
+    return float(F.cosine_similarity(a, b, dim=-1).item())
+
+
+def rank_candidates_visual(candidates, item_by_username, seed_usernames, cfg, reference_cfg=None):
+    reference_cfg = reference_cfg or {}
     model_name = cfg.get("model_name", "google/siglip2-base-patch16-224")
     batch_size = int(cfg.get("batch_size", 8))
     images_per_account = int(cfg.get("images_per_account", 6))
     timeout = int(cfg.get("request_timeout_seconds", 15))
+    top_k_refs = int(reference_cfg.get("top_k_references", 2))
+
+    reference_score_weight = float(cfg.get("reference_score_weight", 0.70))
+    consistency_weight = float(cfg.get("consistency_weight", 0.30))
 
     encoder = SigLIP2Encoder(model_name=model_name, batch_size=batch_size)
-    embeddings = {}
+
+    account_embeddings = {}
+    image_embeddings_by_user = {}
 
     usernames = list(dict.fromkeys([c.username for c in candidates] + list(seed_usernames)))
     for idx, username in enumerate(usernames, start=1):
         item = item_by_username.get(username.lower(), {})
         urls = extract_image_urls(item, images_per_account)
+
         images = []
         for url in urls:
             img = load_image(url, timeout)
             if img is not None:
                 images.append(img)
-        emb = account_embedding(encoder, images)
-        if emb is not None:
-            embeddings[username.lower()] = emb
+
+        if images:
+            image_embeddings = encoder.encode_images(images)
+            emb = _account_embedding(image_embeddings)
+            if emb is not None:
+                account_embeddings[username.lower()] = emb
+                image_embeddings_by_user[username.lower()] = image_embeddings
+
         print(f"  visual {idx}/{len(usernames)} {username}: {len(images)} images")
 
-    seed_vectors = [embeddings[s.lower()] for s in seed_usernames if s.lower() in embeddings]
-    reference = seed_embedding(seed_vectors)
-    if reference is None:
-        raise RuntimeError("Could not build seed visual embedding. Check seed images.")
+    references = {
+        s.lower(): account_embeddings[s.lower()]
+        for s in seed_usernames
+        if s.lower() in account_embeddings
+    }
+
+    if not references:
+        raise RuntimeError("Could not build reference visual embeddings. Check reference images.")
 
     for c in candidates:
-        emb = embeddings.get(c.username.lower())
-        c.visual_similarity = cosine_similarity(reference, emb) if emb is not None else None
+        key = c.username.lower()
+        candidate_emb = account_embeddings.get(key)
+        candidate_images = image_embeddings_by_user.get(key)
+
+        if candidate_emb is None:
+            c.visual_similarity = None
+            continue
+
+        ref_scores = []
+        for ref_name, ref_emb in references.items():
+            score = _cos(candidate_emb, ref_emb)
+            if score is not None:
+                ref_scores.append((score, ref_name))
+
+        ref_scores.sort(reverse=True)
+        c.visual_reference_similarity = _aggregate_topk([x[0] for x in ref_scores], top_k_refs)
+        c.nearest_visual_reference = ref_scores[0][1] if ref_scores else ""
+
+        # Robust consistency:
+        # Each candidate post is compared to ALL references, then we use the
+        # median of the per-post best-reference scores. One or two accidental
+        # visually similar posts cannot dominate the account score as easily.
+        per_post_best = []
+        if candidate_images is not None:
+            for image_vec in candidate_images:
+                image_vec = image_vec.unsqueeze(0)
+                scores = [_cos(image_vec, ref_emb) for ref_emb in references.values()]
+                scores = [x for x in scores if x is not None]
+                if scores:
+                    per_post_best.append(max(scores))
+
+        c.visual_post_median_similarity = (
+            float(statistics.median(per_post_best))
+            if per_post_best else None
+        )
+
+        parts = []
+        if c.visual_reference_similarity is not None:
+            parts.append((c.visual_reference_similarity, reference_score_weight))
+        if c.visual_post_median_similarity is not None:
+            parts.append((c.visual_post_median_similarity, consistency_weight))
+
+        denom = sum(w for _, w in parts)
+        c.visual_similarity = (
+            sum(score * weight for score, weight in parts) / denom
+            if denom else None
+        )
 
     ranked = sorted(
         candidates,
-        key=lambda c: (c.visual_similarity is not None, c.visual_similarity or -1),
+        key=lambda c: (
+            c.visual_similarity is not None,
+            c.visual_similarity if c.visual_similarity is not None else -1,
+        ),
         reverse=True,
     )
     for rank, c in enumerate(ranked, start=1):
         c.visual_rank = rank
+
     return ranked

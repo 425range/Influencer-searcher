@@ -1,5 +1,5 @@
 campaign:
-  name: influencer_discovery_poc_v06_gui
+  name: influencer_discovery_poc_v07_gui
   product: 클렌즈 음료
 discovery:
   use_keyword_search: true
@@ -10,16 +10,15 @@ discovery:
   - 자기관리 직장인 여성 인플루언서
   - 운동 자기관리 여성 인플루언서
   - 라이프스타일 여성 인플루언서
-  - 연애프로그램 출연 여성 인플루언서
   seed_usernames:
   - lamuzes
   - 2dumi
+  - minyoung_aori
   - m.inngu
-  - dano_day
   - __haeppy
-  seed_expansion_depth: 2
-  max_related_per_profile: 30
-  max_seed_candidates: 200
+  seed_expansion_depth: 1
+  max_related_per_profile: 10
+  max_seed_candidates: 50
 filters:
   min_followers: 100000
   max_followers: 1000000
@@ -32,19 +31,26 @@ targeting:
   - 직장인
   - 라이프스타일
   - 웰니스
-  - 건강
   hard_exclude_keywords:
   - 육아
   - 키즈
-  - 먹방
+  - 남자패션
+  - 남성
+  - 남자향수
   soft_exclude_keywords:
-  - 뷰티
-  - 성형
-  - 화장품
+  - 마운자로
+  - 헬스
   soft_exclude_penalty: 0.1
   hard_exclude_categories:
   - parenting
   hard_exclude_category_threshold: 0.2
+  gender_filter:
+    enabled: true
+    target: female
+    bio_weight: 3.0
+    caption_weight: 1.0
+    reject_threshold: 3.0
+    opposite_margin: 2.0
 analysis:
   ad_keywords:
   - '#광고'
@@ -96,12 +102,14 @@ visual:
   images_per_account: 6
   batch_size: 8
   request_timeout_seconds: 15
+  reference_score_weight: 0.7
+  consistency_weight: 0.3
 performance:
   enabled: true
-  accounts_to_analyze: 30
-  ad_reels_target: 5
-  max_reels_to_scan: 50
-  only_posts_newer_than: 12 months
+  accounts_to_analyze: 5
+  ad_reels_target: 3
+  max_reels_to_scan: 10
+  only_posts_newer_than: 6 months
   skip_pinned_posts: true
   include_shares_count: false
 commercial_filter:
@@ -124,7 +132,7 @@ scoring:
     follower_fit: 0.05
 output:
   sqlite_path: data/influencers.db
-  excel_path: output/candidates_v06.xlsx
+  excel_path: output/candidates_v07.xlsx
 text_similarity:
   enabled: true
   model_name: intfloat/multilingual-e5-small
@@ -145,5 +153,11 @@ text_similarity:
   - 데일리
   - 좋아요
 similarity_ranking:
-  visual_weight: 0.6
-  content_weight: 0.4
+  weights:
+    visual: 0.55
+    caption: 0.25
+    hashtag: 0.1
+    graph: 0.1
+  min_combined_similarity: null
+reference_matching:
+  top_k_references: 2

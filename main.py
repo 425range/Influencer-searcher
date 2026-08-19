@@ -14,7 +14,7 @@ from src.collectors.instagram_reels import scrape_reels, reels_from_items
 from src.analysis.ad_detector import mark_ads
 from src.analysis.category import build_text, category_scores
 from src.analysis.similarity import seed_similarity
-from src.analysis.target_filters import apply_targeting
+from src.analysis.target_filters import apply_targeting, evaluate_gender_target
 from src.analysis.scoring import pre_score, final_score
 from src.analysis.reel_metrics import build_reel_metrics, commercial_reject_reason
 from src.visual.account_ranker import rank_candidates_visual
@@ -32,8 +32,33 @@ def merge_candidates(*groups):
             existing = merged.get(key)
             if existing is None:
                 merged[key] = c
-            elif priority.get(c.source, 0) > priority.get(existing.source, 0):
-                merged[key] = c
+            else:
+                # Preserve all Reference-set graph hits even when the same
+                # account is also discovered by keyword search.
+                existing.reference_hits = sorted(
+                    set(getattr(existing, "reference_hits", []) or [])
+                    | set(getattr(c, "reference_hits", []) or [])
+                )
+                existing.reference_overlap_count = max(
+                    getattr(existing, "reference_overlap_count", 0),
+                    getattr(c, "reference_overlap_count", 0),
+                    len(existing.reference_hits),
+                )
+                existing.reference_overlap_ratio = max(
+                    getattr(existing, "reference_overlap_ratio", 0.0) or 0.0,
+                    getattr(c, "reference_overlap_ratio", 0.0) or 0.0,
+                )
+                if getattr(c, "graph_similarity", None) is not None:
+                    existing.graph_similarity = max(
+                        getattr(existing, "graph_similarity", 0.0) or 0.0,
+                        c.graph_similarity,
+                    )
+                if priority.get(c.source, 0) > priority.get(existing.source, 0):
+                    c.reference_hits = existing.reference_hits
+                    c.reference_overlap_count = existing.reference_overlap_count
+                    c.reference_overlap_ratio = existing.reference_overlap_ratio
+                    c.graph_similarity = existing.graph_similarity
+                    merged[key] = c
     return list(merged.values())
 
 
@@ -59,6 +84,10 @@ def candidate_row(c, metrics, performance_analyzed, include_hits="", soft_hits="
         "source": c.source,
         "source_seed": c.source_seed,
         "discovery_depth": c.discovery_depth,
+        "reference_hits": ", ".join(c.reference_hits),
+        "reference_overlap_count": c.reference_overlap_count,
+        "reference_overlap_ratio": c.reference_overlap_ratio,
+        "graph_similarity": c.graph_similarity,
         "display_name": c.display_name,
         "followers": c.followers,
         "bio": c.bio,
@@ -67,12 +96,22 @@ def candidate_row(c, metrics, performance_analyzed, include_hits="", soft_hits="
         "seed_similarity_legacy": c.seed_similarity,
         "pre_score": c.pre_score,
         "visual_similarity": c.visual_similarity,
+        "visual_reference_similarity": c.visual_reference_similarity,
+        "visual_post_median_similarity": c.visual_post_median_similarity,
+        "nearest_visual_reference": c.nearest_visual_reference,
         "caption_similarity": c.caption_similarity,
+        "nearest_text_reference": c.nearest_text_reference,
         "hashtag_similarity": c.hashtag_similarity,
+        "nearest_hashtag_reference": c.nearest_hashtag_reference,
         "shared_hashtags": c.shared_hashtags,
         "content_similarity": c.content_similarity,
         "text_posts_used": c.text_posts_used,
+        "gender_signal": c.gender_signal,
+        "gender_target_match": c.gender_target_match,
+        "gender_evidence": c.gender_evidence,
         "combined_similarity": c.combined_similarity,
+        "ranking_signals_used": c.ranking_signals_used,
+        "quality_pass": c.quality_pass,
         "performance_analyzed": performance_analyzed,
         "reels_scanned": metrics.get("reels_scanned") if performance_analyzed else None,
         "requested_ad_reels": metrics.get("requested_ad_reels") if performance_analyzed else None,
@@ -223,9 +262,30 @@ def main(config_path):
         user_posts = profile_posts_by_user.get(c.username.lower(), [])
         text = build_text(c.bio, [p.caption for p in user_posts])
         t = apply_targeting(text, targeting)
+
+        # Conservative creator gender-target filter. Uses explicit Bio/Caption
+        # self-description signals only; no image/name-based inference.
+        gender_meta = evaluate_gender_target(
+            bio=c.bio,
+            captions=[p.caption for p in user_posts],
+            gender_cfg=targeting.get("gender_filter", {}),
+        )
+        t.update(gender_meta)
         target_meta[c.username.lower()] = t
+
+        c.gender_signal = gender_meta["gender_signal"]
+        c.gender_target_match = gender_meta["gender_target_match"]
+        c.gender_evidence = gender_meta["gender_evidence"]
+
         if t["hard_reject"]:
             rejected_rows.append(reject_row(c, "hard_exclude:" + ",".join(t["hard_exclude_hits"]), "targeting"))
+            continue
+
+        if gender_meta["gender_reject"]:
+            reason = "gender_target_mismatch:" + gender_meta["gender_signal"]
+            if gender_meta["gender_evidence"]:
+                reason += ":" + gender_meta["gender_evidence"]
+            rejected_rows.append(reject_row(c, reason, "gender_filter"))
             continue
 
         c.category_scores = category_scores(text, cfg["analysis"]["category_keywords"])
@@ -266,13 +326,20 @@ def main(config_path):
             seed_usernames=seeds,
             cfg=text_cfg,
             ad_keywords=cfg["analysis"]["ad_keywords"],
+            reference_cfg=cfg.get("reference_matching", {}),
         )
     else:
         print("  text similarity skipped")
 
     print("[5/11] SigLIP visual similarity")
     if cfg.get("visual", {}).get("enabled", True) and candidates:
-        candidates = rank_candidates_visual(candidates, item_by_username, seeds, cfg["visual"])
+        candidates = rank_candidates_visual(
+            candidates,
+            item_by_username,
+            seeds,
+            cfg["visual"],
+            cfg.get("reference_matching", {}),
+        )
     else:
         for c in candidates:
             c.visual_similarity = None
@@ -281,6 +348,30 @@ def main(config_path):
     print("[6/11] Combined content + visual ranking")
     if candidates:
         candidates = rank_candidates_combined(candidates, cfg.get("similarity_ranking", {}))
+
+    # Optional quality threshold. Do not force-fill the requested result count
+    # with weak candidates.
+    qcfg = cfg.get("similarity_ranking", {})
+    min_similarity = qcfg.get("min_combined_similarity")
+    if min_similarity is not None and str(min_similarity).strip() != "":
+        min_similarity = float(min_similarity)
+        quality_kept = []
+        for c in candidates:
+            passed = c.combined_similarity is not None and c.combined_similarity >= min_similarity
+            c.quality_pass = passed
+            if passed:
+                quality_kept.append(c)
+            else:
+                rejected_rows.append(reject_row(
+                    c,
+                    f"combined_similarity<{min_similarity}",
+                    "quality_threshold",
+                ))
+        candidates = quality_kept
+        print(f"  quality threshold >= {min_similarity}: {len(candidates)} kept")
+    else:
+        for c in candidates:
+            c.quality_pass = True
 
     print("[7/11] Select accounts for Reel performance")
     pcfg = cfg.get("performance", {})

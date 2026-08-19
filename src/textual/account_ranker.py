@@ -137,6 +137,15 @@ def _fingerprint(model_name: str, cfg: dict, caption_docs: list[str]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+
+def _aggregate_reference_scores(scores: list[tuple[float, str]], top_k: int):
+    scores = sorted(scores, key=lambda x: x[0], reverse=True)
+    if not scores:
+        return None, ""
+    k = max(1, min(int(top_k), len(scores)))
+    return sum(x[0] for x in scores[:k]) / k, scores[0][1]
+
+
 def rank_candidates_text(
     candidates,
     item_by_username: dict,
@@ -144,7 +153,11 @@ def rank_candidates_text(
     seed_usernames: list[str],
     cfg: dict,
     ad_keywords: list[str],
+    reference_cfg: dict | None = None,
 ):
+    reference_cfg = reference_cfg or {}
+    top_k_refs = int(reference_cfg.get("top_k_references", 2))
+
     model_name = cfg.get("model_name", "intfloat/multilingual-e5-small")
     batch_size = int(cfg.get("batch_size", 16))
     max_length = int(cfg.get("max_length", 512))
@@ -192,29 +205,54 @@ def rank_candidates_text(
 
         if encoder is None:
             encoder = E5TextEncoder(model_name, batch_size=batch_size, max_length=max_length)
+
         doc_embeddings = encoder.encode(caption_docs)
         account_emb = _mean_normalized([doc_embeddings])
         if account_emb is not None:
             embeddings[key] = account_emb
             cache[key] = {"fingerprint": fp, "embedding": account_emb}
             torch.save(cache, cache_path)
+
         print(f"  text {idx}/{len(usernames)} {username}: posts={selected_count}, docs={len(caption_docs)}, tags={len(hashtag_set)}")
 
-    seed_vectors = [embeddings[s.lower()] for s in seed_usernames if s.lower() in embeddings]
-    reference_caption = _mean_normalized(seed_vectors)
-    seed_tag_sets = [hashtags.get(s.lower(), set()) for s in seed_usernames]
-    seed_tag_union = set().union(*seed_tag_sets) if seed_tag_sets else set()
+    reference_embeddings = {
+        s.lower(): embeddings[s.lower()]
+        for s in seed_usernames
+        if s.lower() in embeddings
+    }
+    reference_hashtags = {
+        s.lower(): hashtags.get(s.lower(), set())
+        for s in seed_usernames
+    }
+    all_reference_tags = set().union(*reference_hashtags.values()) if reference_hashtags else set()
 
     for c in candidates:
         key = c.username.lower()
-        c.caption_similarity = _cosine(reference_caption, embeddings.get(key))
 
-        tag_scores = [
-            score for score in (_jaccard(hashtags.get(key, set()), seed_tags) for seed_tags in seed_tag_sets)
-            if score is not None
-        ]
-        c.hashtag_similarity = sum(tag_scores) / len(tag_scores) if tag_scores else None
-        c.shared_hashtags = ", ".join(sorted(hashtags.get(key, set()) & seed_tag_union))
+        caption_scores = []
+        candidate_emb = embeddings.get(key)
+        if candidate_emb is not None:
+            for ref_name, ref_emb in reference_embeddings.items():
+                score = _cosine(candidate_emb, ref_emb)
+                if score is not None:
+                    caption_scores.append((score, ref_name))
+
+        c.caption_similarity, c.nearest_text_reference = _aggregate_reference_scores(
+            caption_scores, top_k_refs
+        )
+
+        hashtag_scores = []
+        candidate_tags = hashtags.get(key, set())
+        for ref_name, ref_tags in reference_hashtags.items():
+            score = _jaccard(candidate_tags, ref_tags)
+            if score is not None:
+                hashtag_scores.append((score, ref_name))
+
+        c.hashtag_similarity, c.nearest_hashtag_reference = _aggregate_reference_scores(
+            hashtag_scores, top_k_refs
+        )
+
+        c.shared_hashtags = ", ".join(sorted(candidate_tags & all_reference_tags))
         c.text_posts_used = posts_used.get(key, 0)
 
         available = []
@@ -225,7 +263,7 @@ def rank_candidates_text(
 
         if available:
             denom = sum(w for _, w in available)
-            c.content_similarity = sum(score * w for score, w in available) / denom if denom else 0.0
+            c.content_similarity = sum(score * w for score, w in available) / denom if denom else None
         else:
             c.content_similarity = None
 
@@ -233,21 +271,40 @@ def rank_candidates_text(
 
 
 def rank_candidates_combined(candidates, cfg: dict):
-    visual_weight = float(cfg.get("visual_weight", 0.60))
-    content_weight = float(cfg.get("content_weight", 0.40))
+    """
+    v0.7 dynamic weighting.
+
+    Missing captions do NOT get a zero. The remaining available signals are
+    re-normalized automatically. This avoids penalizing macro accounts that
+    rarely write captions.
+    """
+    weights = cfg.get("weights", {}) or {}
+
+    visual_weight = float(weights.get("visual", cfg.get("visual_weight", 0.55)))
+    caption_weight = float(weights.get("caption", 0.25))
+    hashtag_weight = float(weights.get("hashtag", 0.10))
+    graph_weight = float(weights.get("graph", 0.10))
 
     for c in candidates:
         parts = []
-        if c.visual_similarity is not None:
-            parts.append((c.visual_similarity, visual_weight))
-        if c.content_similarity is not None:
-            parts.append((c.content_similarity, content_weight))
 
-        if parts:
-            denom = sum(w for _, w in parts)
-            c.combined_similarity = sum(score * w for score, w in parts) / denom if denom else 0.0
-        else:
-            c.combined_similarity = None
+        if c.visual_similarity is not None:
+            parts.append(("visual", c.visual_similarity, visual_weight))
+        if c.caption_similarity is not None:
+            parts.append(("caption", c.caption_similarity, caption_weight))
+        if c.hashtag_similarity is not None:
+            parts.append(("hashtag", c.hashtag_similarity, hashtag_weight))
+        if c.graph_similarity is not None:
+            parts.append(("graph", c.graph_similarity, graph_weight))
+
+        active = [(name, score, w) for name, score, w in parts if w > 0]
+        denom = sum(w for _, _, w in active)
+
+        c.combined_similarity = (
+            sum(score * w for _, score, w in active) / denom
+            if denom else None
+        )
+        c.ranking_signals_used = ", ".join(name for name, _, _ in active)
 
     ranked = sorted(
         candidates,
@@ -260,4 +317,5 @@ def rank_candidates_combined(candidates, cfg: dict):
     )
     for rank, c in enumerate(ranked, start=1):
         c.combined_rank = rank
+
     return ranked
