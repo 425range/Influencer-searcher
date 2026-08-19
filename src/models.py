@@ -18,7 +18,19 @@ class Candidate:
 
     category_scores: Dict[str, float] = field(default_factory=dict)
     seed_similarity: float = 0.0
+    pre_score: float = 0.0
+    visual_similarity: Optional[float] = None
+    visual_rank: Optional[int] = None
+    caption_similarity: Optional[float] = None
+    hashtag_similarity: Optional[float] = None
+    shared_hashtags: str = ""
+    content_similarity: Optional[float] = None
+    text_posts_used: int = 0
+    combined_similarity: Optional[float] = None
+    combined_rank: Optional[int] = None
     score: float = 0.0
+    status: str = "candidate"
+    reject_reason: str = ""
 
 
 @dataclass
@@ -29,6 +41,9 @@ class Post:
     views: Optional[int] = None
     likes: Optional[int] = None
     comments: Optional[int] = None
+    shares: Optional[int] = None
     timestamp: str = ""
     content_type: str = ""
     is_ad: bool = False
+    ad_detection_reason: str = ""
+    paid_partnership: bool = False

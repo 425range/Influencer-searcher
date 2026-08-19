@@ -1,3 +1,7 @@
+# v0.6 GUI + Content Similarity
+
+이번 버전은 기존 SigLIP Visual Similarity에 Caption/Hashtag Content Similarity를 추가합니다. 자세한 내용은 `README_V06.md`를 참고하세요.
+
 # Influencer Discovery PoC v0.2
 
 이번 버전은 v0.1의 두 가지 핵심 문제를 수정합니다.
@@ -101,3 +105,8 @@ v0.3에서는 seed 계정과 후보 계정의 bio + caption을 embedding하여
 
 현재 v0.2는 "Instagram이 related profile로 연결했는가"를
 가장 강한 similarity signal로 사용합니다.
+
+
+## YouTube v0.3
+
+See `README_YOUTUBE_V03.md` and run `youtube_main.py`.

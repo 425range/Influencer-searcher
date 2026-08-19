@@ -1,87 +1,149 @@
 campaign:
-  name: "reset48_poc_v02"
-  product: "클렌즈 음료"
-
+  name: influencer_discovery_poc_v06_gui
+  product: 클렌즈 음료
 discovery:
-  # keyword_search는 보조 소스입니다.
-  use_keyword_search: false
-  google_actor_id: "apify/google-search-scraper"
+  use_keyword_search: true
+  google_actor_id: apify/google-search-scraper
   max_pages_per_query: 1
   keyword_result_limit: 50
-
   queries:
-    - "자기관리 직장인 여성 인플루언서"
-    - "운동 자기관리 여성 인플루언서"
-    - "라이프스타일 여성 인플루언서"
-
-  # 핵심: 아래 seed에서 Instagram relatedProfiles를 따라 후보를 확장합니다.
+  - 자기관리 직장인 여성 인플루언서
+  - 운동 자기관리 여성 인플루언서
+  - 라이프스타일 여성 인플루언서
+  - 연애프로그램 출연 여성 인플루언서
   seed_usernames:
-    - "lamuzes"
-    - "2dumi"
-
-  seed_expansion_depth: 1
+  - lamuzes
+  - 2dumi
+  - m.inngu
+  - dano_day
+  - __haeppy
+  seed_expansion_depth: 2
   max_related_per_profile: 30
-  max_seed_candidates: 120
-
+  max_seed_candidates: 200
 filters:
-  min_followers: 30000
-  max_followers: 500000
-
-  # 중요: followers를 못 가져온 계정은 통과시키지 않습니다.
+  min_followers: 100000
+  max_followers: 1000000
   allow_unknown_followers: false
-
-  # seed 계정 자체는 비교 기준이므로 결과 후보에서는 기본 제외.
   include_seed_accounts: false
-
+targeting:
+  include_keywords:
+  - 자기관리
+  - 운동
+  - 직장인
+  - 라이프스타일
+  - 웰니스
+  - 건강
+  hard_exclude_keywords:
+  - 육아
+  - 키즈
+  - 먹방
+  soft_exclude_keywords:
+  - 뷰티
+  - 성형
+  - 화장품
+  soft_exclude_penalty: 0.1
+  hard_exclude_categories:
+  - parenting
+  hard_exclude_category_threshold: 0.2
 analysis:
   ad_keywords:
-    - "#광고"
-    - "#협찬"
-    - "#제품제공"
-    - "#유료광고"
-    - "paid partnership"
-    - "sponsored"
-
+  - '#광고'
+  - '#협찬'
+  - '#제품제공'
+  - '#유료광고'
+  - paid partnership
+  - sponsored
   category_keywords:
     fitness:
-      - "운동"
-      - "헬스"
-      - "러닝"
-      - "필라테스"
-      - "요가"
-      - "오운완"
+    - 운동
+    - 헬스
+    - 러닝
+    - 필라테스
+    - 요가
+    - 오운완
     selfcare:
-      - "자기관리"
-      - "건강관리"
-      - "루틴"
-      - "웰니스"
-      - "식단"
+    - 자기관리
+    - 건강관리
+    - 루틴
+    - 웰니스
+    - 식단
     office:
-      - "직장인"
-      - "출근"
-      - "퇴근"
-      - "회사"
-      - "오피스"
+    - 직장인
+    - 출근
+    - 퇴근
+    - 회사
+    - 오피스
     lifestyle:
-      - "일상"
-      - "라이프"
-      - "브이로그"
-      - "여행"
-      - "카페"
+    - 일상
+    - 라이프
+    - 브이로그
+    - 여행
+    - 카페
     beauty:
-      - "뷰티"
-      - "메이크업"
-      - "화장품"
-      - "스킨케어"
-
+    - 뷰티
+    - 메이크업
+    - 화장품
+    - 스킨케어
+    parenting:
+    - 육아
+    - 아이
+    - 키즈
+    - 엄마
+    - 아기
+visual:
+  enabled: true
+  model_name: google/siglip2-base-patch16-224
+  images_per_account: 6
+  batch_size: 8
+  request_timeout_seconds: 15
+performance:
+  enabled: true
+  accounts_to_analyze: 30
+  ad_reels_target: 5
+  max_reels_to_scan: 50
+  only_posts_newer_than: 12 months
+  skip_pinned_posts: true
+  include_shares_count: false
+commercial_filter:
+  min_ad_reels: null
+  max_ad_reels_in_scan: null
+  max_ad_ratio: null
+  reject_no_reel_data: false
 scoring:
+  desired_categories:
+  - fitness
+  - selfcare
+  - office
+  - lifestyle
   weights:
-    seed_similarity: 0.35
-    category_fit: 0.20
-    ad_performance: 0.20
+    visual_similarity: 0.3
+    content_similarity: 0.2
+    category_fit: 0.1
+    ad_performance: 0.2
     engagement: 0.15
-    follower_fit: 0.10
-
+    follower_fit: 0.05
 output:
-  sqlite_path: "data/influencers.db"
-  excel_path: "output/candidates.xlsx"
+  sqlite_path: data/influencers.db
+  excel_path: output/candidates_v06.xlsx
+text_similarity:
+  enabled: true
+  model_name: intfloat/multilingual-e5-small
+  recent_posts: 8
+  include_ads: false
+  include_bio: true
+  caption_weight: 0.8
+  hashtag_weight: 0.2
+  batch_size: 16
+  max_length: 512
+  cache_path: cache/text_embeddings.pt
+  stop_hashtags:
+  - 광고
+  - 협찬
+  - 제품제공
+  - 유료광고
+  - 일상
+  - 데일리
+  - 좋아요
+similarity_ranking:
+  visual_weight: 0.6
+  content_weight: 0.4
