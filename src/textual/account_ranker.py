@@ -138,12 +138,62 @@ def _fingerprint(model_name: str, cfg: dict, caption_docs: list[str]) -> str:
 
 
 
+DEFAULT_TOPIC_PROMPTS = {
+    "fitness": "운동 헬스 러닝 필라테스 요가 스포츠 피트니스 콘텐츠",
+    "selfcare": "자기관리 웰니스 건강관리 식단 루틴 라이프스타일 콘텐츠",
+    "fashion": "패션 스타일링 코디 데일리룩 의류 패션 콘텐츠",
+    "beauty": "뷰티 메이크업 스킨케어 화장품 미용 콘텐츠",
+    "office": "직장인 회사 출근 퇴근 오피스 커리어 일상 콘텐츠",
+    "travel": "여행 호텔 해외여행 국내여행 관광 휴가 콘텐츠",
+    "food": "맛집 음식 요리 카페 디저트 먹방 콘텐츠",
+    "parenting": "육아 아이 아기 가족 키즈 부모 콘텐츠",
+    "couple": "연애 커플 데이트 여자친구 남자친구 부부 관계 콘텐츠",
+    "entertainment": "방송 예능 연예인 출연자 셀럽 엔터테인먼트 콘텐츠",
+}
+
+
 def _aggregate_reference_scores(scores: list[tuple[float, str]], top_k: int):
     scores = sorted(scores, key=lambda x: x[0], reverse=True)
     if not scores:
         return None, ""
     k = max(1, min(int(top_k), len(scores)))
     return sum(x[0] for x in scores[:k]) / k, scores[0][1]
+
+
+def _topic_profile(account_emb, topic_embeddings, topic_names):
+    if account_emb is None or topic_embeddings is None or not len(topic_names):
+        return None
+    sims = torch.matmul(
+        F.normalize(account_emb, p=2, dim=-1),
+        F.normalize(topic_embeddings, p=2, dim=-1).T,
+    ).squeeze(0)
+    # Raw E5 cosine scores tend to have a high common baseline. Centering the
+    # topic vector makes the RELATIVE topic pattern matter more than the
+    # absolute cosine level.
+    centered = sims - sims.mean()
+    norm = centered.norm(p=2)
+    if float(norm) < 1e-8:
+        return None
+    return centered / norm
+
+
+def _topic_profile_similarity(a, b):
+    if a is None or b is None:
+        return None
+    # cosine [-1,1] -> [0,1]
+    value = float(torch.dot(a, b).item())
+    return max(0.0, min(1.0, (value + 1.0) / 2.0))
+
+
+def _topic_profile_text(profile, topic_names):
+    if profile is None:
+        return ""
+    pairs = sorted(
+        zip(topic_names, profile.tolist()),
+        key=lambda x: x[1],
+        reverse=True,
+    )
+    return ", ".join(f"{name}:{score:.3f}" for name, score in pairs[:5])
 
 
 def rank_candidates_text(
@@ -154,17 +204,28 @@ def rank_candidates_text(
     cfg: dict,
     ad_keywords: list[str],
     reference_cfg: dict | None = None,
+    negative_usernames: list[str] | None = None,
 ):
+    """
+    v0.8:
+    - raw caption similarity remains diagnostic only
+    - topic-profile similarity becomes the main content signal
+    - missing captions remain missing (not zero)
+    - optional negative references create a positive-vs-negative margin
+    """
     reference_cfg = reference_cfg or {}
+    negative_usernames = list(negative_usernames or [])
     top_k_refs = int(reference_cfg.get("top_k_references", 2))
 
     model_name = cfg.get("model_name", "intfloat/multilingual-e5-small")
     batch_size = int(cfg.get("batch_size", 16))
     max_length = int(cfg.get("max_length", 512))
-    caption_weight = float(cfg.get("caption_weight", 0.8))
-    hashtag_weight = float(cfg.get("hashtag_weight", 0.2))
     cache_path = Path(cfg.get("cache_path", "cache/text_embeddings.pt"))
     cache_path.parent.mkdir(parents=True, exist_ok=True)
+
+    topic_prompts = cfg.get("topic_prompts", {}) or DEFAULT_TOPIC_PROMPTS
+    topic_names = list(topic_prompts.keys())
+    topic_texts = [topic_prompts[name] for name in topic_names]
 
     cache = {}
     if cache_path.exists():
@@ -174,7 +235,11 @@ def rank_candidates_text(
             cache = {}
 
     payloads = {}
-    usernames = list(dict.fromkeys([c.username for c in candidates] + list(seed_usernames)))
+    usernames = list(dict.fromkeys(
+        [c.username for c in candidates]
+        + list(seed_usernames)
+        + negative_usernames
+    ))
     for username in usernames:
         key = username.lower()
         item = item_by_username.get(key, {})
@@ -200,7 +265,7 @@ def rank_candidates_text(
             continue
 
         if not caption_docs:
-            print(f"  text {idx}/{len(usernames)} {username}: no usable caption, posts={selected_count}")
+            print(f"  text {idx}/{len(usernames)} {username}: no usable text, posts={selected_count}")
             continue
 
         if encoder is None:
@@ -215,39 +280,84 @@ def rank_candidates_text(
 
         print(f"  text {idx}/{len(usernames)} {username}: posts={selected_count}, docs={len(caption_docs)}, tags={len(hashtag_set)}")
 
-    reference_embeddings = {
+    # Encoder may not have been created if every account came from cache.
+    if topic_texts:
+        if encoder is None:
+            encoder = E5TextEncoder(model_name, batch_size=batch_size, max_length=max_length)
+        topic_embeddings = encoder.encode(topic_texts)
+    else:
+        topic_embeddings = None
+
+    topic_profiles = {
+        key: _topic_profile(emb, topic_embeddings, topic_names)
+        for key, emb in embeddings.items()
+    }
+
+    positive_embeddings = {
         s.lower(): embeddings[s.lower()]
-        for s in seed_usernames
-        if s.lower() in embeddings
+        for s in seed_usernames if s.lower() in embeddings
     }
-    reference_hashtags = {
-        s.lower(): hashtags.get(s.lower(), set())
-        for s in seed_usernames
+    positive_topics = {
+        s.lower(): topic_profiles.get(s.lower())
+        for s in seed_usernames if topic_profiles.get(s.lower()) is not None
     }
-    all_reference_tags = set().union(*reference_hashtags.values()) if reference_hashtags else set()
+    positive_hashtags = {
+        s.lower(): hashtags.get(s.lower(), set()) for s in seed_usernames
+    }
+
+    negative_topics = {
+        s.lower(): topic_profiles.get(s.lower())
+        for s in negative_usernames if topic_profiles.get(s.lower()) is not None
+    }
+
+    all_reference_tags = (
+        set().union(*positive_hashtags.values()) if positive_hashtags else set()
+    )
 
     for c in candidates:
         key = c.username.lower()
-
-        caption_scores = []
         candidate_emb = embeddings.get(key)
+        candidate_topic = topic_profiles.get(key)
+
+        # Legacy/raw caption score is retained only for diagnostics.
+        caption_scores = []
         if candidate_emb is not None:
-            for ref_name, ref_emb in reference_embeddings.items():
+            for ref_name, ref_emb in positive_embeddings.items():
                 score = _cosine(candidate_emb, ref_emb)
                 if score is not None:
                     caption_scores.append((score, ref_name))
-
         c.caption_similarity, c.nearest_text_reference = _aggregate_reference_scores(
             caption_scores, top_k_refs
         )
 
-        hashtag_scores = []
+        # Topic-profile similarity (relative distribution, not raw cosine).
+        topic_scores = []
+        for ref_name, ref_profile in positive_topics.items():
+            score = _topic_profile_similarity(candidate_topic, ref_profile)
+            if score is not None:
+                topic_scores.append((score, ref_name))
+        c.topic_similarity, _ = _aggregate_reference_scores(topic_scores, top_k_refs)
+
+        neg_topic_scores = []
+        for ref_name, ref_profile in negative_topics.items():
+            score = _topic_profile_similarity(candidate_topic, ref_profile)
+            if score is not None:
+                neg_topic_scores.append((score, ref_name))
+        c.topic_negative_similarity, _ = _aggregate_reference_scores(
+            neg_topic_scores, top_k_refs
+        )
+
+        if c.topic_similarity is not None and c.topic_negative_similarity is not None:
+            c.topic_target_margin = c.topic_similarity - c.topic_negative_similarity
+
+        c.topic_profile = _topic_profile_text(candidate_topic, topic_names)
+
         candidate_tags = hashtags.get(key, set())
-        for ref_name, ref_tags in reference_hashtags.items():
+        hashtag_scores = []
+        for ref_name, ref_tags in positive_hashtags.items():
             score = _jaccard(candidate_tags, ref_tags)
             if score is not None:
                 hashtag_scores.append((score, ref_name))
-
         c.hashtag_similarity, c.nearest_hashtag_reference = _aggregate_reference_scores(
             hashtag_scores, top_k_refs
         )
@@ -255,54 +365,61 @@ def rank_candidates_text(
         c.shared_hashtags = ", ".join(sorted(candidate_tags & all_reference_tags))
         c.text_posts_used = posts_used.get(key, 0)
 
-        available = []
-        if c.caption_similarity is not None:
-            available.append((c.caption_similarity, caption_weight))
+        # v0.8 content score: Topic first, hashtag second. Raw caption cosine is
+        # intentionally excluded from the default ranking because it clustered
+        # around ~0.97 in the previous real-world test.
+        parts = []
+        if c.topic_similarity is not None:
+            parts.append((c.topic_similarity, 0.85))
         if c.hashtag_similarity is not None:
-            available.append((c.hashtag_similarity, hashtag_weight))
+            parts.append((c.hashtag_similarity, 0.15))
 
-        if available:
-            denom = sum(w for _, w in available)
-            c.content_similarity = sum(score * w for score, w in available) / denom if denom else None
-        else:
-            c.content_similarity = None
+        denom = sum(w for _, w in parts)
+        c.content_similarity = (
+            sum(score * w for score, w in parts) / denom if denom else None
+        )
 
     return candidates
 
 
 def rank_candidates_combined(candidates, cfg: dict):
     """
-    v0.7 dynamic weighting.
+    v0.8 dynamic ranking.
 
-    Missing captions do NOT get a zero. The remaining available signals are
-    re-normalized automatically. This avoids penalizing macro accounts that
-    rarely write captions.
+    Default:
+      Visual 60%
+      Topic profile 25%
+      Hashtag 10%
+      Graph 5%
+
+    Raw caption cosine is NOT used by default.
+    Missing signals are removed and remaining weights are re-normalized.
     """
     weights = cfg.get("weights", {}) or {}
-
-    visual_weight = float(weights.get("visual", cfg.get("visual_weight", 0.55)))
-    caption_weight = float(weights.get("caption", 0.25))
+    visual_weight = float(weights.get("visual", 0.60))
+    topic_weight = float(weights.get("topic", 0.25))
     hashtag_weight = float(weights.get("hashtag", 0.10))
-    graph_weight = float(weights.get("graph", 0.10))
+    graph_weight = float(weights.get("graph", 0.05))
+    caption_weight = float(weights.get("caption", 0.0))
 
     for c in candidates:
         parts = []
-
         if c.visual_similarity is not None:
             parts.append(("visual", c.visual_similarity, visual_weight))
-        if c.caption_similarity is not None:
-            parts.append(("caption", c.caption_similarity, caption_weight))
+        if c.topic_similarity is not None:
+            parts.append(("topic", c.topic_similarity, topic_weight))
         if c.hashtag_similarity is not None:
             parts.append(("hashtag", c.hashtag_similarity, hashtag_weight))
         if c.graph_similarity is not None:
             parts.append(("graph", c.graph_similarity, graph_weight))
+        if caption_weight > 0 and c.caption_similarity is not None:
+            parts.append(("caption_raw", c.caption_similarity, caption_weight))
 
         active = [(name, score, w) for name, score, w in parts if w > 0]
         denom = sum(w for _, _, w in active)
 
         c.combined_similarity = (
-            sum(score * w for _, score, w in active) / denom
-            if denom else None
+            sum(score * w for _, score, w in active) / denom if denom else None
         )
         c.ranking_signals_used = ", ".join(name for name, _, _ in active)
 
@@ -317,5 +434,4 @@ def rank_candidates_combined(candidates, cfg: dict):
     )
     for rank, c in enumerate(ranked, start=1):
         c.combined_rank = rank
-
     return ranked

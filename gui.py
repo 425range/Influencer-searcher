@@ -60,7 +60,7 @@ class ScrollText(tk.Text):
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Influencer Discovery PoC v0.7.2")
+        self.title("Influencer Discovery PoC v0.8")
         self.geometry("1120x900")
         self.minsize(980, 760)
 
@@ -264,7 +264,7 @@ class App(tk.Tk):
         ).pack(side="left")
         tk.Label(
             title_box,
-            text="  v0.7.2 GUI",
+            text="  v0.8 GUI",
             bg=c["header"],
             fg="#BFDBFE",
             font=("Segoe UI", 10, "bold"),
@@ -558,6 +558,35 @@ class App(tk.Tk):
             wraplength=320,
         ).grid(row=7, column=2, sticky="w", padx=12)
 
+        ttk.Separator(f).grid(row=8, column=0, columnspan=3, sticky="ew", pady=14)
+        ttk.Label(f, text="Creator Target Gate", style="Section.Card.TLabel").grid(row=9, column=0, columnspan=2, sticky="w")
+
+        self.creator_gate_enabled = tk.BooleanVar(value=True)
+        self.min_visual_reference = tk.StringVar()
+        self.min_visual_median = tk.StringVar()
+        self.min_topic_similarity = tk.StringVar()
+        self.min_target_fit = tk.StringVar()
+        self.negative_margin_reject = tk.StringVar()
+
+        ttk.Checkbutton(
+            f,
+            text="Reference 기반 Creator Target Gate 사용",
+            variable=self.creator_gate_enabled,
+        ).grid(row=10, column=1, sticky="w", pady=7)
+
+        self._entry(f, 11, "최소 Visual Reference", self.min_visual_reference, help_text="기본 0.89")
+        self._entry(f, 12, "최소 Visual 게시물 중앙값", self.min_visual_median, help_text="기본 0.82")
+        self._entry(f, 13, "최소 Topic Similarity", self.min_topic_similarity, help_text="기본 0.50")
+        self._entry(f, 14, "최소 Creator Target Fit", self.min_target_fit, help_text="기본 0.52")
+        self._entry(f, 15, "Negative Reference 마진", self.negative_margin_reject, help_text="기본 -0.02")
+
+        ttk.Label(
+            f,
+            text="얼굴 성별을 판별하지 않습니다. Positive/Negative Reference와 계정 전체 Visual·Topic 패턴을 비교해 타깃 적합도를 판단합니다.",
+            style="Muted.Card.TLabel",
+            wraplength=720,
+        ).grid(row=16, column=0, columnspan=3, sticky="w", pady=(12, 0))
+
     def _build_content_tab(self):
         f = self.tab_content
         f.columnconfigure(1, weight=1)
@@ -572,7 +601,9 @@ class App(tk.Tk):
         self.text_batch_size = tk.StringVar()
         self.stop_hashtags = None
         self.reference_top_k = tk.StringVar()
+        self.negative_references = None
         self.rank_visual_weight = tk.StringVar()
+        self.rank_topic_weight = tk.StringVar()
         self.rank_caption_weight = tk.StringVar()
         self.rank_hashtag_weight = tk.StringVar()
         self.rank_graph_weight = tk.StringVar()
@@ -590,18 +621,25 @@ class App(tk.Tk):
 
         ttk.Separator(f).grid(row=9, column=0, columnspan=3, sticky="ew", pady=14)
         ttk.Label(f, text="Reference Set + Dynamic Ranking", style="Section.Card.TLabel").grid(row=10, column=0, columnspan=2, sticky="w")
-        self._entry(f, 11, "가까운 Reference Top K", self.reference_top_k, help_text="예: 2 → 여러 레퍼런스 중 가장 가까운 2명 평균")
-        self._entry(f, 12, "Visual 가중치", self.rank_visual_weight, help_text="기본 0.55")
-        self._entry(f, 13, "Caption 가중치", self.rank_caption_weight, help_text="캡션 없으면 자동 제외 후 재정규화")
-        self._entry(f, 14, "Hashtag 가중치", self.rank_hashtag_weight)
-        self._entry(f, 15, "Graph 가중치", self.rank_graph_weight, help_text="여러 Reference 추천망에 겹쳐 등장할수록 상승")
-        self._entry(f, 16, "최소 통합 유사도", self.min_combined_similarity, help_text="빈칸=제한 없음. 낮은 후보를 억지로 채우지 않음")
+        self._entry(f, 11, "가까운 Reference Top K", self.reference_top_k, help_text="예: 2 → 가장 가까운 Positive Reference 2명 평균")
+        self.negative_references = self._text_area(
+            f, 12, "Negative Reference (선택)", 4,
+            "마케터가 '타깃 아님'으로 판단한 계정. Discovery에는 사용하지 않고 비교 기준으로만 사용",
+            tone="warning",
+        )
+        self._entry(f, 13, "Visual 가중치", self.rank_visual_weight, help_text="기본 0.60")
+        self._entry(f, 14, "Topic Profile 가중치", self.rank_topic_weight, help_text="기본 0.25")
+        self._entry(f, 15, "Hashtag 가중치", self.rank_hashtag_weight, help_text="기본 0.10")
+        self._entry(f, 16, "Graph 가중치", self.rank_graph_weight, help_text="기본 0.05")
+        self._entry(f, 17, "Raw Caption 가중치", self.rank_caption_weight, help_text="기본 0.00. 진단값만 유지")
+        self._entry(f, 18, "최소 통합 유사도", self.min_combined_similarity, help_text="빈칸=제한 없음")
 
         note = (
-            "v0.7은 여러 Reference의 평균 하나를 만들지 않고, 후보별로 가장 가까운 Reference들을 비교합니다. "
-            "Caption이 없는 계정은 Caption=0으로 처리하지 않고 Visual/Hashtag/Graph 가중치를 자동 재분배합니다."
+            "v0.8은 raw Caption cosine 대신 Topic Profile을 주 Content 신호로 사용합니다. "
+            "Caption이 없으면 해당 신호는 0점이 아니라 제외 후 가중치를 재분배합니다. "
+            "Negative Reference는 선택사항이며, 이전 결과에서 명확히 타깃이 아니었던 계정을 넣으면 다음 탐색의 분별력이 좋아집니다."
         )
-        ttk.Label(f, text=note, style="Muted.Card.TLabel", wraplength=760).grid(row=17, column=0, columnspan=3, sticky="w", pady=(18, 0))
+        ttk.Label(f, text=note, style="Muted.Card.TLabel", wraplength=760).grid(row=19, column=0, columnspan=3, sticky="w", pady=(18, 0))
 
     def _build_visual_tab(self):
         f = self.tab_visual
@@ -691,6 +729,7 @@ class App(tk.Tk):
         v = c.get("visual", {})
         p = c.get("performance", {})
         cf = c.get("commercial_filter", {})
+        gate = c.get("creator_target_gate", {})
 
         self.campaign_name.set(campaign.get("name", ""))
         self.product.set(campaign.get("product", ""))
@@ -712,6 +751,12 @@ class App(tk.Tk):
         gender_cfg = t.get("gender_filter", {}) or {}
         gender_target = str(gender_cfg.get("target", "all") or "all").lower()
         self.gender_target_display.set({"female": "여성 중심", "male": "남성 중심"}.get(gender_target, "전체"))
+        self.creator_gate_enabled.set(bool(gate.get("enabled", True)))
+        self.min_visual_reference.set(str(gate.get("min_visual_reference", 0.89)))
+        self.min_visual_median.set(str(gate.get("min_visual_median", 0.82)))
+        self.min_topic_similarity.set(str(gate.get("min_topic_similarity", 0.50)))
+        self.min_target_fit.set(str(gate.get("min_target_fit", 0.52)))
+        self.negative_margin_reject.set(str(gate.get("negative_margin_reject", -0.02)))
 
         self.text_enabled.set(bool(txt.get("enabled", True)))
         self.text_model.set(txt.get("model_name", "intfloat/multilingual-e5-small"))
@@ -724,10 +769,12 @@ class App(tk.Tk):
         self._set_text(self.stop_hashtags, join_list(txt.get("stop_hashtags", [])))
         rank_weights = sim.get("weights", {}) or {}
         self.reference_top_k.set(str(ref.get("top_k_references", 2)))
-        self.rank_visual_weight.set(str(rank_weights.get("visual", 0.55)))
-        self.rank_caption_weight.set(str(rank_weights.get("caption", 0.25)))
+        self._set_text(self.negative_references, join_list(ref.get("negative_usernames", [])))
+        self.rank_visual_weight.set(str(rank_weights.get("visual", 0.60)))
+        self.rank_topic_weight.set(str(rank_weights.get("topic", 0.25)))
+        self.rank_caption_weight.set(str(rank_weights.get("caption", 0.00)))
         self.rank_hashtag_weight.set(str(rank_weights.get("hashtag", 0.10)))
-        self.rank_graph_weight.set(str(rank_weights.get("graph", 0.10)))
+        self.rank_graph_weight.set(str(rank_weights.get("graph", 0.05)))
         self.min_combined_similarity.set(
             "" if sim.get("min_combined_similarity") is None
             else str(sim.get("min_combined_similarity"))
@@ -763,6 +810,7 @@ class App(tk.Tk):
         c.setdefault("visual", {})
         c.setdefault("performance", {})
         c.setdefault("commercial_filter", {})
+        c.setdefault("creator_target_gate", {})
 
         c["campaign"]["name"] = self.campaign_name.get().strip()
         c["campaign"]["product"] = self.product.get().strip()
@@ -796,6 +844,15 @@ class App(tk.Tk):
         gender_cfg.setdefault("reject_threshold", 3.0)
         gender_cfg.setdefault("opposite_margin", 2.0)
 
+        gate = c["creator_target_gate"]
+        gate["enabled"] = bool(self.creator_gate_enabled.get())
+        gate["min_visual_reference"] = float(self.min_visual_reference.get())
+        gate["min_visual_median"] = float(self.min_visual_median.get())
+        gate["min_topic_similarity"] = float(self.min_topic_similarity.get())
+        gate["min_target_fit"] = float(self.min_target_fit.get())
+        gate["negative_margin_reject"] = float(self.negative_margin_reject.get())
+        gate.setdefault("reject_low_visual_pair", True)
+
         txt = c["text_similarity"]
         txt["enabled"] = bool(self.text_enabled.get())
         txt["model_name"] = self.text_model.get().strip()
@@ -811,13 +868,15 @@ class App(tk.Tk):
 
         ref = c["reference_matching"]
         ref["top_k_references"] = int(self.reference_top_k.get())
+        ref["negative_usernames"] = split_list(self.negative_references.get("1.0", "end"))
 
         sim = c["similarity_ranking"]
         sim["weights"] = {
             "visual": float(self.rank_visual_weight.get()),
-            "caption": float(self.rank_caption_weight.get()),
+            "topic": float(self.rank_topic_weight.get()),
             "hashtag": float(self.rank_hashtag_weight.get()),
             "graph": float(self.rank_graph_weight.get()),
+            "caption": float(self.rank_caption_weight.get()),
         }
         sim["min_combined_similarity"] = parse_optional_float(self.min_combined_similarity.get())
 
@@ -853,6 +912,9 @@ class App(tk.Tk):
             raise ValueError("Caption/Hashtag 가중치를 확인하세요.")
         if ref["top_k_references"] < 1:
             raise ValueError("Reference Top K는 1 이상이어야 합니다.")
+        for name in ("min_visual_reference", "min_visual_median", "min_topic_similarity", "min_target_fit"):
+            if not 0 <= float(gate[name]) <= 1:
+                raise ValueError(f"{name} 값은 0~1 사이여야 합니다.")
         rank_weights = sim["weights"]
         if any(v < 0 for v in rank_weights.values()) or sum(rank_weights.values()) <= 0:
             raise ValueError("통합 랭킹 가중치를 확인하세요.")

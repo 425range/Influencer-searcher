@@ -15,6 +15,7 @@ from src.analysis.ad_detector import mark_ads
 from src.analysis.category import build_text, category_scores
 from src.analysis.similarity import seed_similarity
 from src.analysis.target_filters import apply_targeting, evaluate_gender_target
+from src.analysis.creator_target import evaluate_creator_target
 from src.analysis.scoring import pre_score, final_score
 from src.analysis.reel_metrics import build_reel_metrics, commercial_reject_reason
 from src.visual.account_ranker import rank_candidates_visual
@@ -99,6 +100,8 @@ def candidate_row(c, metrics, performance_analyzed, include_hits="", soft_hits="
         "visual_reference_similarity": c.visual_reference_similarity,
         "visual_post_median_similarity": c.visual_post_median_similarity,
         "nearest_visual_reference": c.nearest_visual_reference,
+        "visual_negative_similarity": c.visual_negative_similarity,
+        "visual_target_margin": c.visual_target_margin,
         "caption_similarity": c.caption_similarity,
         "nearest_text_reference": c.nearest_text_reference,
         "hashtag_similarity": c.hashtag_similarity,
@@ -106,9 +109,16 @@ def candidate_row(c, metrics, performance_analyzed, include_hits="", soft_hits="
         "shared_hashtags": c.shared_hashtags,
         "content_similarity": c.content_similarity,
         "text_posts_used": c.text_posts_used,
+        "topic_similarity": c.topic_similarity,
+        "topic_negative_similarity": c.topic_negative_similarity,
+        "topic_target_margin": c.topic_target_margin,
+        "topic_profile": c.topic_profile,
         "gender_signal": c.gender_signal,
         "gender_target_match": c.gender_target_match,
         "gender_evidence": c.gender_evidence,
+        "creator_target_fit": c.creator_target_fit,
+        "creator_target_gate": c.creator_target_gate,
+        "creator_target_reason": c.creator_target_reason,
         "combined_similarity": c.combined_similarity,
         "ranking_signals_used": c.ranking_signals_used,
         "quality_pass": c.quality_pass,
@@ -178,9 +188,16 @@ def main(config_path):
     targeting = cfg.get("targeting", {})
     seeds = [x.strip().lstrip("@") for x in dcfg.get("seed_usernames", [])]
     seed_set = {x.lower() for x in seeds}
+    negative_refs = [
+        x.strip().lstrip("@")
+        for x in cfg.get("reference_matching", {}).get("negative_usernames", [])
+        if str(x).strip()
+    ]
+    negative_ref_set = {x.lower() for x in negative_refs}
     rejected_rows = []
+    print(f"  references: positive={len(seeds)}, negative={len(negative_refs)}")
 
-    print("[1/11] Candidate discovery")
+    print("[1/12] Candidate discovery")
     seed_candidates = discover_from_seeds(
         client=client,
         seed_usernames=seeds,
@@ -200,8 +217,10 @@ def main(config_path):
     candidates = merge_candidates(seed_candidates, keyword_candidates)
     print(f"  unique candidates: {len(candidates)}")
 
-    print("[2/11] Profile enrichment")
-    all_to_scrape = list(dict.fromkeys([c.username for c in candidates] + seeds))
+    print("[2/12] Profile enrichment")
+    all_to_scrape = list(dict.fromkeys(
+        [c.username for c in candidates] + seeds + negative_refs
+    ))
     profile_items = scrape_profiles(client, all_to_scrape)
     item_by_username = {
         str(item.get("username", "")).lower(): item
@@ -223,7 +242,7 @@ def main(config_path):
         profile_posts.extend(user_posts)
         enriched.append(c)
 
-    print("[3/11] Hard filters + category")
+    print("[3/12] Hard filters + category")
     # Reuse the already-scraped profile captions for both ad exclusion and text similarity.
     profile_posts = mark_ads(profile_posts, cfg["analysis"]["ad_keywords"])
     profile_posts_by_user = defaultdict(list)
@@ -239,6 +258,12 @@ def main(config_path):
         seed_posts = mark_ads(seed_posts, cfg["analysis"]["ad_keywords"])
         profile_posts_by_user[seed.lower()] = seed_posts
 
+    for ref in negative_refs:
+        item = item_by_username.get(ref.lower(), {})
+        ref_posts = posts_from_profile(item) if item else []
+        ref_posts = mark_ads(ref_posts, cfg["analysis"]["ad_keywords"])
+        profile_posts_by_user[ref.lower()] = ref_posts
+
     seed_texts = []
     for seed in seeds:
         item = item_by_username.get(seed.lower(), {})
@@ -249,6 +274,9 @@ def main(config_path):
     target_meta = {}
     for c in enriched:
         if c.username.lower() in seed_set and not filters.get("include_seed_accounts", False):
+            continue
+        if c.username.lower() in negative_ref_set:
+            rejected_rows.append(reject_row(c, "listed_as_negative_reference", "reference_filter"))
             continue
 
         if c.followers is None:
@@ -316,7 +344,7 @@ def main(config_path):
     candidates = kept
     print(f"  after filters: {len(candidates)}")
 
-    print("[4/11] Caption + hashtag similarity")
+    print("[4/12] Caption + hashtag similarity")
     text_cfg = cfg.get("text_similarity", {})
     if text_cfg.get("enabled", True) and candidates:
         candidates = rank_candidates_text(
@@ -327,11 +355,12 @@ def main(config_path):
             cfg=text_cfg,
             ad_keywords=cfg["analysis"]["ad_keywords"],
             reference_cfg=cfg.get("reference_matching", {}),
+            negative_usernames=negative_refs,
         )
     else:
         print("  text similarity skipped")
 
-    print("[5/11] SigLIP visual similarity")
+    print("[5/12] SigLIP visual similarity")
     if cfg.get("visual", {}).get("enabled", True) and candidates:
         candidates = rank_candidates_visual(
             candidates,
@@ -339,13 +368,33 @@ def main(config_path):
             seeds,
             cfg["visual"],
             cfg.get("reference_matching", {}),
+            negative_usernames=negative_refs,
         )
     else:
         for c in candidates:
             c.visual_similarity = None
             c.visual_rank = None
 
-    print("[6/11] Combined content + visual ranking")
+    print("[6/12] Creator Target Gate + combined ranking")
+    gate_cfg = cfg.get("creator_target_gate", {})
+    gate_kept = []
+    for c in candidates:
+        meta = evaluate_creator_target(c, gate_cfg)
+        c.creator_target_fit = meta["creator_target_fit"]
+        c.creator_target_gate = meta["creator_target_gate"]
+        c.creator_target_reason = meta["creator_target_reason"]
+        if meta["creator_target_reject"]:
+            rejected_rows.append(reject_row(
+                c,
+                meta["creator_target_reason"] or "creator_target_mismatch",
+                "creator_target_gate",
+            ))
+            continue
+        gate_kept.append(c)
+
+    candidates = gate_kept
+    print(f"  after creator target gate: {len(candidates)}")
+
     if candidates:
         candidates = rank_candidates_combined(candidates, cfg.get("similarity_ranking", {}))
 
@@ -373,7 +422,7 @@ def main(config_path):
         for c in candidates:
             c.quality_pass = True
 
-    print("[7/11] Select accounts for Reel performance")
+    print("[7/12] Select accounts for Reel performance")
     pcfg = cfg.get("performance", {})
     performance_enabled = pcfg.get("enabled", True)
     top_n = int(pcfg.get("accounts_to_analyze", 30))
@@ -385,7 +434,7 @@ def main(config_path):
     reel_metrics = {}
     selected_ad_by_user = {}
     if perf_usernames:
-        print("[8/11] Reel tab scraping")
+        print("[8/12] Reel tab scraping")
         reel_items = scrape_reels(
             client=client,
             usernames=perf_usernames,
@@ -401,9 +450,9 @@ def main(config_path):
             ad_target=int(pcfg.get("ad_reels_target", 5)),
         )
     else:
-        print("[8/11] Reel tab scraping skipped")
+        print("[8/12] Reel tab scraping skipped")
 
-    print("[9/11] Commercial filter + final scoring")
+    print("[9/12] Commercial filter + final scoring")
     commercial_cfg = cfg.get("commercial_filter", {})
     final_candidates = []
     for c in candidates:
@@ -432,13 +481,13 @@ def main(config_path):
     not_analyzed.sort(key=lambda c: c.combined_rank or 999999)
     final_candidates = analyzed + not_analyzed
 
-    print("[10/11] SQLite")
+    print("[10/12] SQLite")
     store = SQLiteStore(cfg["output"]["sqlite_path"])
     store.save_candidates(final_candidates)
     store.save_posts(profile_posts + reels)
     store.close()
 
-    print("[11/11] Excel")
+    print("[11/12] Excel")
     candidate_rows = []
     for idx, c in enumerate(final_candidates, start=1):
         t = target_meta.get(c.username.lower(), {})

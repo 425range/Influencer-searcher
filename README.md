@@ -1,3 +1,7 @@
+# Influencer Discovery PoC v0.8
+
+최신 변경사항은 `README_V08.md`를 확인하세요.
+
 # Influencer Discovery PoC v0.7
 
 최신 변경사항은 `README_V07.md`를 확인하세요.

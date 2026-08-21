@@ -27,8 +27,27 @@ def _cos(a, b) -> float | None:
     return float(F.cosine_similarity(a, b, dim=-1).item())
 
 
-def rank_candidates_visual(candidates, item_by_username, seed_usernames, cfg, reference_cfg=None):
+def rank_candidates_visual(
+    candidates,
+    item_by_username,
+    seed_usernames,
+    cfg,
+    reference_cfg=None,
+    negative_usernames=None,
+):
+    """
+    v0.8 visual reference matching.
+
+    Positive References define the desired visual taste.
+    Optional Negative References define known off-target examples.
+
+    No gender/identity is inferred from faces. The gate only measures whether
+    the account's overall visual pattern is closer to positive or negative
+    marketer-provided reference examples.
+    """
     reference_cfg = reference_cfg or {}
+    negative_usernames = list(negative_usernames or [])
+
     model_name = cfg.get("model_name", "google/siglip2-base-patch16-224")
     batch_size = int(cfg.get("batch_size", 8))
     images_per_account = int(cfg.get("images_per_account", 6))
@@ -43,7 +62,12 @@ def rank_candidates_visual(candidates, item_by_username, seed_usernames, cfg, re
     account_embeddings = {}
     image_embeddings_by_user = {}
 
-    usernames = list(dict.fromkeys([c.username for c in candidates] + list(seed_usernames)))
+    usernames = list(dict.fromkeys(
+        [c.username for c in candidates]
+        + list(seed_usernames)
+        + negative_usernames
+    ))
+
     for idx, username in enumerate(usernames, start=1):
         item = item_by_username.get(username.lower(), {})
         urls = extract_image_urls(item, images_per_account)
@@ -63,14 +87,19 @@ def rank_candidates_visual(candidates, item_by_username, seed_usernames, cfg, re
 
         print(f"  visual {idx}/{len(usernames)} {username}: {len(images)} images")
 
-    references = {
+    positive_refs = {
         s.lower(): account_embeddings[s.lower()]
         for s in seed_usernames
         if s.lower() in account_embeddings
     }
+    negative_refs = {
+        s.lower(): account_embeddings[s.lower()]
+        for s in negative_usernames
+        if s.lower() in account_embeddings
+    }
 
-    if not references:
-        raise RuntimeError("Could not build reference visual embeddings. Check reference images.")
+    if not positive_refs:
+        raise RuntimeError("Could not build positive Reference visual embeddings.")
 
     for c in candidates:
         key = c.username.lower()
@@ -81,25 +110,43 @@ def rank_candidates_visual(candidates, item_by_username, seed_usernames, cfg, re
             c.visual_similarity = None
             continue
 
-        ref_scores = []
-        for ref_name, ref_emb in references.items():
+        pos_scores = []
+        for ref_name, ref_emb in positive_refs.items():
             score = _cos(candidate_emb, ref_emb)
             if score is not None:
-                ref_scores.append((score, ref_name))
+                pos_scores.append((score, ref_name))
+        pos_scores.sort(reverse=True)
 
-        ref_scores.sort(reverse=True)
-        c.visual_reference_similarity = _aggregate_topk([x[0] for x in ref_scores], top_k_refs)
-        c.nearest_visual_reference = ref_scores[0][1] if ref_scores else ""
+        c.visual_reference_similarity = _aggregate_topk(
+            [x[0] for x in pos_scores], top_k_refs
+        )
+        c.nearest_visual_reference = pos_scores[0][1] if pos_scores else ""
 
-        # Robust consistency:
-        # Each candidate post is compared to ALL references, then we use the
-        # median of the per-post best-reference scores. One or two accidental
-        # visually similar posts cannot dominate the account score as easily.
+        neg_scores = []
+        for ref_name, ref_emb in negative_refs.items():
+            score = _cos(candidate_emb, ref_emb)
+            if score is not None:
+                neg_scores.append((score, ref_name))
+        neg_scores.sort(reverse=True)
+        c.visual_negative_similarity = _aggregate_topk(
+            [x[0] for x in neg_scores], top_k_refs
+        )
+
+        if (
+            c.visual_reference_similarity is not None
+            and c.visual_negative_similarity is not None
+        ):
+            c.visual_target_margin = (
+                c.visual_reference_similarity - c.visual_negative_similarity
+            )
+
+        # Account-level consistency: compare each recent post to all positive
+        # references and use the median best-match score.
         per_post_best = []
         if candidate_images is not None:
             for image_vec in candidate_images:
                 image_vec = image_vec.unsqueeze(0)
-                scores = [_cos(image_vec, ref_emb) for ref_emb in references.values()]
+                scores = [_cos(image_vec, ref_emb) for ref_emb in positive_refs.values()]
                 scores = [x for x in scores if x is not None]
                 if scores:
                     per_post_best.append(max(scores))
@@ -131,5 +178,4 @@ def rank_candidates_visual(candidates, item_by_username, seed_usernames, cfg, re
     )
     for rank, c in enumerate(ranked, start=1):
         c.visual_rank = rank
-
     return ranked

@@ -1,5 +1,5 @@
 campaign:
-  name: influencer_discovery_poc_v08_gui
+  name: influencer_discovery_poc_v07_gui
   product: 클렌즈 음료
 discovery:
   use_keyword_search: true
@@ -18,7 +18,7 @@ discovery:
   - __haeppy
   seed_expansion_depth: 1
   max_related_per_profile: 10
-  max_seed_candidates: 40
+  max_seed_candidates: 50
 filters:
   min_followers: 100000
   max_followers: 1000000
@@ -30,15 +30,16 @@ targeting:
   - 운동
   - 직장인
   - 라이프스타일
+  - 웰니스
   hard_exclude_keywords:
   - 육아
   - 키즈
-  - 마운자로
-  - 비만
-  - 남성
   - 남자패션
+  - 남성
+  - 남자향수
   soft_exclude_keywords:
-  - 뷰티
+  - 마운자로
+  - 헬스
   soft_exclude_penalty: 0.1
   hard_exclude_categories:
   - parenting
@@ -105,8 +106,8 @@ visual:
   consistency_weight: 0.3
 performance:
   enabled: true
-  accounts_to_analyze: 30
-  ad_reels_target: 5
+  accounts_to_analyze: 5
+  ad_reels_target: 3
   max_reels_to_scan: 10
   only_posts_newer_than: 6 months
   skip_pinned_posts: true
@@ -131,7 +132,7 @@ scoring:
     follower_fit: 0.05
 output:
   sqlite_path: data/influencers.db
-  excel_path: output/candidates_v08.xlsx
+  excel_path: output/candidates_v07.xlsx
 text_similarity:
   enabled: true
   model_name: intfloat/multilingual-e5-small
@@ -151,33 +152,12 @@ text_similarity:
   - 일상
   - 데일리
   - 좋아요
-  topic_prompts:
-    fitness: 운동 헬스 러닝 필라테스 요가 스포츠 피트니스 콘텐츠
-    selfcare: 자기관리 웰니스 건강관리 식단 루틴 라이프스타일 콘텐츠
-    fashion: 패션 스타일링 코디 데일리룩 의류 패션 콘텐츠
-    beauty: 뷰티 메이크업 스킨케어 화장품 미용 콘텐츠
-    office: 직장인 회사 출근 퇴근 오피스 커리어 일상 콘텐츠
-    travel: 여행 호텔 해외여행 국내여행 관광 휴가 콘텐츠
-    food: 맛집 음식 요리 카페 디저트 먹방 콘텐츠
-    parenting: 육아 아이 아기 가족 키즈 부모 콘텐츠
-    couple: 연애 커플 데이트 여자친구 남자친구 부부 관계 콘텐츠
-    entertainment: 방송 예능 연예인 출연자 셀럽 엔터테인먼트 콘텐츠
 similarity_ranking:
   weights:
-    visual: 0.6
-    topic: 0.25
+    visual: 0.55
+    caption: 0.25
     hashtag: 0.1
-    graph: 0.05
-    caption: 0.0
+    graph: 0.1
   min_combined_similarity: null
 reference_matching:
   top_k_references: 2
-  negative_usernames: []
-creator_target_gate:
-  enabled: true
-  min_visual_reference: 0.89
-  min_visual_median: 0.82
-  min_topic_similarity: 0.5
-  min_target_fit: 0.52
-  negative_margin_reject: -0.02
-  reject_low_visual_pair: true

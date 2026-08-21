@@ -32,6 +32,8 @@ class Candidate:
     visual_post_median_similarity: Optional[float] = None
     nearest_visual_reference: str = ""
     visual_rank: Optional[int] = None
+    visual_negative_similarity: Optional[float] = None
+    visual_target_margin: Optional[float] = None
 
     # Text / hashtag
     caption_similarity: Optional[float] = None
@@ -41,10 +43,17 @@ class Candidate:
     shared_hashtags: str = ""
     content_similarity: Optional[float] = None
     text_posts_used: int = 0
+    topic_similarity: Optional[float] = None
+    topic_negative_similarity: Optional[float] = None
+    topic_target_margin: Optional[float] = None
+    topic_profile: str = ""
 
     gender_signal: str = ""
     gender_target_match: Optional[bool] = None
     gender_evidence: str = ""
+    creator_target_fit: Optional[float] = None
+    creator_target_gate: str = ""
+    creator_target_reason: str = ""
 
     # Dynamic reference-set ranking
     combined_similarity: Optional[float] = None
