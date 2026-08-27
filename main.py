@@ -198,12 +198,21 @@ def main(config_path):
     print(f"  references: positive={len(seeds)}, negative={len(negative_refs)}")
 
     print("[1/12] Candidate discovery")
+    # Cache Reference profile responses from discovery so the enrichment stage
+    # does not pay to scrape the same References again.
+    discovery_profile_cache = {}
     seed_candidates = discover_from_seeds(
         client=client,
         seed_usernames=seeds,
         depth=dcfg.get("seed_expansion_depth", 1),
         max_related_per_profile=dcfg.get("max_related_per_profile", 20),
         max_candidates=dcfg.get("max_seed_candidates", 100),
+        profile_cache=discovery_profile_cache,
+        use_related_fallback=dcfg.get("use_related_fallback", True),
+        related_fallback_actor_id=dcfg.get(
+            "related_fallback_actor_id",
+            "instagram-scraper/instagram-related-profiles",
+        ),
     )
     keyword_candidates = []
     if dcfg.get("use_keyword_search", True):
@@ -215,17 +224,44 @@ def main(config_path):
             result_limit=dcfg.get("keyword_result_limit", 50),
         )
     candidates = merge_candidates(seed_candidates, keyword_candidates)
-    print(f"  unique candidates: {len(candidates)}")
+    print(
+        f"  discovery summary: related={len(seed_candidates)}, "
+        f"google={len(keyword_candidates)}, merged_unique={len(candidates)}"
+    )
 
     print("[2/12] Profile enrichment")
-    all_to_scrape = list(dict.fromkeys(
+    all_needed = list(dict.fromkeys(
         [c.username for c in candidates] + seeds + negative_refs
     ))
-    profile_items = scrape_profiles(client, all_to_scrape)
-    item_by_username = {
-        str(item.get("username", "")).lower(): item
-        for item in profile_items if item.get("username")
-    }
+
+    # Start with profiles already scraped during seed discovery.
+    item_by_username = dict(discovery_profile_cache)
+    missing_profiles = [
+        username for username in all_needed
+        if username.lower() not in item_by_username
+    ]
+
+    if missing_profiles:
+        print(
+            f"  profile enrichment: cached={len(item_by_username)}, "
+            f"scraping_missing={len(missing_profiles)}"
+        )
+        profile_items = scrape_profiles(client, missing_profiles)
+        for item in profile_items:
+            username = str(item.get("username", "")).strip()
+            if username:
+                item_by_username[username.lower()] = item
+    else:
+        print(
+            f"  profile enrichment: cached={len(item_by_username)}, "
+            "scraping_missing=0"
+        )
+
+    if not candidates:
+        print(
+            "  WARNING: discovery returned 0 candidates. "
+            "No extra candidate profile requests will be made."
+        )
 
     profile_posts = []
     enriched = []

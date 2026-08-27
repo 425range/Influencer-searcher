@@ -60,7 +60,7 @@ class ScrollText(tk.Text):
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Influencer Discovery PoC v0.8")
+        self.title("Influencer Discovery PoC v0.8.1")
         self.geometry("1120x900")
         self.minsize(980, 760)
 
@@ -264,7 +264,7 @@ class App(tk.Tk):
         ).pack(side="left")
         tk.Label(
             title_box,
-            text="  v0.8 GUI",
+            text="  v0.8.1 GUI",
             bg=c["header"],
             fg="#BFDBFE",
             font=("Segoe UI", 10, "bold"),

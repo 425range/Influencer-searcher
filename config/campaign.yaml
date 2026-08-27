@@ -1,5 +1,5 @@
 campaign:
-  name: influencer_discovery_poc_v08_gui
+  name: influencer_discovery_poc_v081_gui
   product: 클렌즈 음료
 discovery:
   use_keyword_search: true
@@ -13,15 +13,14 @@ discovery:
   seed_usernames:
   - lamuzes
   - 2dumi
-  - minyoung_aori
-  - m.inngu
-  - __haeppy
-  seed_expansion_depth: 1
-  max_related_per_profile: 10
-  max_seed_candidates: 40
+  seed_expansion_depth: 2
+  max_related_per_profile: 20
+  max_seed_candidates: 120
+  use_related_fallback: true
+  related_fallback_actor_id: instagram-scraper/instagram-related-profiles
 filters:
-  min_followers: 100000
-  max_followers: 1000000
+  min_followers: 30000
+  max_followers: 500000
   allow_unknown_followers: false
   include_seed_accounts: false
 targeting:
@@ -33,10 +32,6 @@ targeting:
   hard_exclude_keywords:
   - 육아
   - 키즈
-  - 마운자로
-  - 비만
-  - 남성
-  - 남자패션
   soft_exclude_keywords:
   - 뷰티
   soft_exclude_penalty: 0.1
@@ -107,8 +102,8 @@ performance:
   enabled: true
   accounts_to_analyze: 30
   ad_reels_target: 5
-  max_reels_to_scan: 10
-  only_posts_newer_than: 6 months
+  max_reels_to_scan: 30
+  only_posts_newer_than: 12 months
   skip_pinned_posts: true
   include_shares_count: false
 commercial_filter:
@@ -131,7 +126,7 @@ scoring:
     follower_fit: 0.05
 output:
   sqlite_path: data/influencers.db
-  excel_path: output/candidates_v08.xlsx
+  excel_path: output/candidates_v081.xlsx
 text_similarity:
   enabled: true
   model_name: intfloat/multilingual-e5-small
