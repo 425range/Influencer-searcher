@@ -26,6 +26,14 @@ class Candidate:
     seed_similarity: float = 0.0
     pre_score: float = 0.0
 
+    # Visual
+    visual_similarity: Optional[float] = None
+    visual_reference_similarity: Optional[float] = None
+    visual_post_median_similarity: Optional[float] = None
+    nearest_visual_reference: str = ""
+    visual_rank: Optional[int] = None
+    visual_negative_similarity: Optional[float] = None
+    visual_target_margin: Optional[float] = None
 
     # Text / hashtag
     caption_similarity: Optional[float] = None
@@ -43,6 +51,9 @@ class Candidate:
     gender_signal: str = ""
     gender_target_match: Optional[bool] = None
     gender_evidence: str = ""
+    creator_target_fit: Optional[float] = None
+    creator_target_gate: str = ""
+    creator_target_reason: str = ""
 
     # Dynamic reference-set ranking
     combined_similarity: Optional[float] = None

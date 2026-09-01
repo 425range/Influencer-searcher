@@ -768,7 +768,7 @@ class App(tk.Tk):
         d["use_keyword_search"] = bool(self.use_keyword_search.get())
         d["use_hashtag_search"] = bool(self.use_hashtag_search.get())
         d["hashtags"] = [x.lstrip("#") for x in split_list(self.hashtags.get("1.0", "end"))]
-        d["hashtag_actor_id"] = "apify/instagram-hashtag-scraper"
+        d["hashtag_actor_id"] = "instaprism/instagram-hashtag-posts"
         d["hashtag_initial_posts"] = int(self.hashtag_initial_posts.get())
         d["hashtag_target_valid_candidates"] = int(self.hashtag_target_valid.get())
         d["hashtag_max_posts"] = int(self.hashtag_max_posts.get())
@@ -799,6 +799,7 @@ class App(tk.Tk):
         gender_cfg.setdefault("reject_threshold", 3.0)
         gender_cfg.setdefault("opposite_margin", 2.0)
 
+        gate.setdefault("reject_low_visual_pair", True)
 
         txt = c["text_similarity"]
         txt["enabled"] = bool(self.text_enabled.get())

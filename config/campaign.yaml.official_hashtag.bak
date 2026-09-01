@@ -19,7 +19,7 @@ discovery:
   use_related_fallback: true
   related_fallback_actor_id: instagram-scraper/instagram-related-profiles
   use_hashtag_search: true
-  hashtag_actor_id: apify/instagram-hashtag-scraper
+  hashtag_actor_id: instaprism/instagram-hashtag-posts
   hashtag_initial_posts: 100
   hashtag_expand_search: false
   hashtag_max_posts: 300

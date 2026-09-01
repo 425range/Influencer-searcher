@@ -16,6 +16,7 @@ from src.analysis.ad_detector import mark_ads
 from src.analysis.category import build_text, category_scores
 from src.analysis.similarity import seed_similarity
 from src.analysis.target_filters import apply_targeting, evaluate_gender_target
+from src.analysis.creator_target import evaluate_creator_target
 from src.analysis.scoring import pre_score, final_score
 from src.analysis.reel_metrics import build_reel_metrics, commercial_reject_reason
 from src.textual.account_ranker import rank_candidates_text
@@ -124,6 +125,9 @@ def candidate_row(c, metrics, performance_analyzed, include_hits="", soft_hits="
         "gender_signal": c.gender_signal,
         "gender_target_match": c.gender_target_match,
         "gender_evidence": c.gender_evidence,
+        "creator_target_fit": c.creator_target_fit,
+        "creator_target_gate": c.creator_target_gate,
+        "creator_target_reason": c.creator_target_reason,
         "ranking_score": getattr(c, "ranking_score", None),
         "ranking_rank": getattr(c, "ranking_rank", None),
         "ranking_signals_used": c.ranking_signals_used,
@@ -203,7 +207,7 @@ def main(config_path):
     rejected_rows = []
     print(f"  references: positive={len(seeds)}, negative={len(negative_refs)}")
 
-    print("[1/11] Candidate discovery")
+    print("[1/12] Candidate discovery")
     # Cache Reference profile responses from discovery so the enrichment stage
     # does not pay to scrape the same References again.
     discovery_profile_cache = {}
@@ -235,7 +239,7 @@ def main(config_path):
         hashtag_candidates, hashtag_stats = discover_by_hashtags(
             client=client,
             hashtags=dcfg.get("hashtags", []),
-            actor_id=dcfg.get("hashtag_actor_id", "apify/instagram-hashtag-scraper"),
+            actor_id=dcfg.get("hashtag_actor_id", "instaprism/instagram-hashtag-posts"),
             initial_posts=int(dcfg.get("hashtag_initial_posts", 100)),
             max_posts=int(dcfg.get("hashtag_max_posts", 300)),
             target_valid_candidates=int(dcfg.get("hashtag_target_valid_candidates", 10)),
@@ -247,7 +251,7 @@ def main(config_path):
     candidates = merge_candidates(seed_candidates, keyword_candidates, hashtag_candidates)
     print(f"  discovery summary: related={len(seed_candidates)}, google={len(keyword_candidates)}, hashtag={len(hashtag_candidates)}, merged_unique={len(candidates)}")
 
-    print("[2/11] Profile enrichment")
+    print("[2/12] Profile enrichment")
     all_needed = list(dict.fromkeys(
         [c.username for c in candidates] + seeds + negative_refs
     ))
@@ -296,7 +300,7 @@ def main(config_path):
         profile_posts.extend(user_posts)
         enriched.append(c)
 
-    print("[3/11] Hard filters + category")
+    print("[3/12] Hard filters + category")
     # Reuse the already-scraped profile captions for both ad exclusion and text similarity.
     profile_posts = mark_ads(profile_posts, cfg["analysis"]["ad_keywords"])
     profile_posts_by_user = defaultdict(list)
@@ -398,7 +402,7 @@ def main(config_path):
     candidates = kept
     print(f"  after filters: {len(candidates)}")
 
-    print("[4/11] Caption + hashtag similarity")
+    print("[4/12] Caption + hashtag similarity")
     text_cfg = cfg.get("text_similarity", {})
     if text_cfg.get("enabled", True) and candidates:
         candidates = rank_candidates_text(

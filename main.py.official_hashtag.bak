@@ -235,7 +235,7 @@ def main(config_path):
         hashtag_candidates, hashtag_stats = discover_by_hashtags(
             client=client,
             hashtags=dcfg.get("hashtags", []),
-            actor_id=dcfg.get("hashtag_actor_id", "apify/instagram-hashtag-scraper"),
+            actor_id=dcfg.get("hashtag_actor_id", "instaprism/instagram-hashtag-posts"),
             initial_posts=int(dcfg.get("hashtag_initial_posts", 100)),
             max_posts=int(dcfg.get("hashtag_max_posts", 300)),
             target_valid_candidates=int(dcfg.get("hashtag_target_valid_candidates", 10)),

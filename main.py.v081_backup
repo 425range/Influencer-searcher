@@ -8,7 +8,6 @@ from dotenv import load_dotenv
 from src.config_loader import load_config
 from src.discovery.seed_related import discover_from_seeds
 from src.discovery.apify_google import discover_by_keywords
-from src.discovery.hashtag_recent import discover_by_hashtags
 from src.collectors.instagram_profile import scrape_profiles
 from src.collectors.profile_parser import enrich_candidate, posts_from_profile
 from src.collectors.instagram_reels import scrape_reels, reels_from_items
@@ -16,16 +15,18 @@ from src.analysis.ad_detector import mark_ads
 from src.analysis.category import build_text, category_scores
 from src.analysis.similarity import seed_similarity
 from src.analysis.target_filters import apply_targeting, evaluate_gender_target
+from src.analysis.creator_target import evaluate_creator_target
 from src.analysis.scoring import pre_score, final_score
 from src.analysis.reel_metrics import build_reel_metrics, commercial_reject_reason
-from src.textual.account_ranker import rank_candidates_text
+from src.visual.account_ranker import rank_candidates_visual
+from src.textual.account_ranker import rank_candidates_text, rank_candidates_combined
 from src.storage.sqlite_store import SQLiteStore
 from src.exporters.excel_exporter import export
 
 
 def merge_candidates(*groups):
     merged = {}
-    priority = {"seed_related": 3, "hashtag": 2, "keyword": 1}
+    priority = {"seed_related": 2, "keyword": 1}
     for group in groups:
         for c in group:
             key = c.username.lower()
@@ -62,23 +63,6 @@ def merge_candidates(*groups):
     return list(merged.values())
 
 
-def rank_candidates_nonvisual(candidates, cfg):
-    weights = (cfg or {}).get("weights", {})
-    signal_map = {"topic": "topic_similarity", "hashtag": "hashtag_similarity", "graph": "graph_similarity", "caption": "caption_similarity"}
-    for c in candidates:
-        parts, used = [], []
-        for name, attr in signal_map.items():
-            w = float(weights.get(name, 0.0) or 0.0)
-            v = getattr(c, attr, None)
-            if w > 0 and v is not None:
-                parts.append((float(v), w)); used.append(name)
-        denom = sum(w for _, w in parts)
-        c.ranking_score = sum(v*w for v,w in parts)/denom if denom else (c.content_similarity or c.pre_score/100.0)
-        c.ranking_signals_used = ",".join(used) if used else "content_fallback"
-    candidates.sort(key=lambda c: (getattr(c, "ranking_score", 0.0), c.content_similarity if c.content_similarity is not None else -1.0, c.pre_score), reverse=True)
-    for idx, c in enumerate(candidates, 1): c.ranking_rank = idx
-    return candidates
-
 def reject_row(candidate, reason, stage):
     return {
         "username": candidate.username,
@@ -94,6 +78,8 @@ def reject_row(candidate, reason, stage):
 def candidate_row(c, metrics, performance_analyzed, include_hits="", soft_hits=""):
     return {
         "final_rank": None,
+        "combined_rank": c.combined_rank,
+        "visual_rank": c.visual_rank,
         "username": c.username,
         "profile_url": c.profile_url,
         "source": c.source,
@@ -110,6 +96,12 @@ def candidate_row(c, metrics, performance_analyzed, include_hits="", soft_hits="
         "soft_exclude_hits": soft_hits,
         "seed_similarity_legacy": c.seed_similarity,
         "pre_score": c.pre_score,
+        "visual_similarity": c.visual_similarity,
+        "visual_reference_similarity": c.visual_reference_similarity,
+        "visual_post_median_similarity": c.visual_post_median_similarity,
+        "nearest_visual_reference": c.nearest_visual_reference,
+        "visual_negative_similarity": c.visual_negative_similarity,
+        "visual_target_margin": c.visual_target_margin,
         "caption_similarity": c.caption_similarity,
         "nearest_text_reference": c.nearest_text_reference,
         "hashtag_similarity": c.hashtag_similarity,
@@ -124,8 +116,10 @@ def candidate_row(c, metrics, performance_analyzed, include_hits="", soft_hits="
         "gender_signal": c.gender_signal,
         "gender_target_match": c.gender_target_match,
         "gender_evidence": c.gender_evidence,
-        "ranking_score": getattr(c, "ranking_score", None),
-        "ranking_rank": getattr(c, "ranking_rank", None),
+        "creator_target_fit": c.creator_target_fit,
+        "creator_target_gate": c.creator_target_gate,
+        "creator_target_reason": c.creator_target_reason,
+        "combined_similarity": c.combined_similarity,
         "ranking_signals_used": c.ranking_signals_used,
         "quality_pass": c.quality_pass,
         "performance_analyzed": performance_analyzed,
@@ -203,7 +197,7 @@ def main(config_path):
     rejected_rows = []
     print(f"  references: positive={len(seeds)}, negative={len(negative_refs)}")
 
-    print("[1/11] Candidate discovery")
+    print("[1/12] Candidate discovery")
     # Cache Reference profile responses from discovery so the enrichment stage
     # does not pay to scrape the same References again.
     discovery_profile_cache = {}
@@ -229,25 +223,13 @@ def main(config_path):
             max_pages_per_query=dcfg.get("max_pages_per_query", 1),
             result_limit=dcfg.get("keyword_result_limit", 50),
         )
-    hashtag_candidates = []
-    hashtag_stats = {}
-    if dcfg.get("use_hashtag_search", False):
-        hashtag_candidates, hashtag_stats = discover_by_hashtags(
-            client=client,
-            hashtags=dcfg.get("hashtags", []),
-            actor_id=dcfg.get("hashtag_actor_id", "apify/instagram-hashtag-scraper"),
-            initial_posts=int(dcfg.get("hashtag_initial_posts", 100)),
-            max_posts=int(dcfg.get("hashtag_max_posts", 300)),
-            target_valid_candidates=int(dcfg.get("hashtag_target_valid_candidates", 10)),
-            min_followers=int(filters["min_followers"]),
-            max_followers=int(filters["max_followers"]),
-            expand_search=bool(dcfg.get("hashtag_expand_search", False)),
-            allow_unknown_followers=bool(dcfg.get("hashtag_allow_unknown_followers", False)),
-        )
-    candidates = merge_candidates(seed_candidates, keyword_candidates, hashtag_candidates)
-    print(f"  discovery summary: related={len(seed_candidates)}, google={len(keyword_candidates)}, hashtag={len(hashtag_candidates)}, merged_unique={len(candidates)}")
+    candidates = merge_candidates(seed_candidates, keyword_candidates)
+    print(
+        f"  discovery summary: related={len(seed_candidates)}, "
+        f"google={len(keyword_candidates)}, merged_unique={len(candidates)}"
+    )
 
-    print("[2/11] Profile enrichment")
+    print("[2/12] Profile enrichment")
     all_needed = list(dict.fromkeys(
         [c.username for c in candidates] + seeds + negative_refs
     ))
@@ -296,7 +278,7 @@ def main(config_path):
         profile_posts.extend(user_posts)
         enriched.append(c)
 
-    print("[3/11] Hard filters + category")
+    print("[3/12] Hard filters + category")
     # Reuse the already-scraped profile captions for both ad exclusion and text similarity.
     profile_posts = mark_ads(profile_posts, cfg["analysis"]["ad_keywords"])
     profile_posts_by_user = defaultdict(list)
@@ -398,7 +380,7 @@ def main(config_path):
     candidates = kept
     print(f"  after filters: {len(candidates)}")
 
-    print("[4/11] Caption + hashtag similarity")
+    print("[4/12] Caption + hashtag similarity")
     text_cfg = cfg.get("text_similarity", {})
     if text_cfg.get("enabled", True) and candidates:
         candidates = rank_candidates_text(
@@ -414,23 +396,69 @@ def main(config_path):
     else:
         print("  text similarity skipped")
 
-    print("[5/11] Non-visual target/ranking")
+    print("[5/12] SigLIP visual similarity")
+    if cfg.get("visual", {}).get("enabled", True) and candidates:
+        candidates = rank_candidates_visual(
+            candidates,
+            item_by_username,
+            seeds,
+            cfg["visual"],
+            cfg.get("reference_matching", {}),
+            negative_usernames=negative_refs,
+        )
+    else:
+        for c in candidates:
+            c.visual_similarity = None
+            c.visual_rank = None
+
+    print("[6/12] Creator Target Gate + combined ranking")
+    gate_cfg = cfg.get("creator_target_gate", {})
+    gate_kept = []
+    for c in candidates:
+        meta = evaluate_creator_target(c, gate_cfg)
+        c.creator_target_fit = meta["creator_target_fit"]
+        c.creator_target_gate = meta["creator_target_gate"]
+        c.creator_target_reason = meta["creator_target_reason"]
+        if meta["creator_target_reject"]:
+            rejected_rows.append(reject_row(
+                c,
+                meta["creator_target_reason"] or "creator_target_mismatch",
+                "creator_target_gate",
+            ))
+            continue
+        gate_kept.append(c)
+
+    candidates = gate_kept
+    print(f"  after creator target gate: {len(candidates)}")
+
     if candidates:
-        candidates = rank_candidates_nonvisual(candidates, cfg.get("similarity_ranking", {}))
+        candidates = rank_candidates_combined(candidates, cfg.get("similarity_ranking", {}))
+
+    # Optional quality threshold. Do not force-fill the requested result count
+    # with weak candidates.
     qcfg = cfg.get("similarity_ranking", {})
-    min_similarity = qcfg.get("min_ranking_score")
+    min_similarity = qcfg.get("min_combined_similarity")
     if min_similarity is not None and str(min_similarity).strip() != "":
         min_similarity = float(min_similarity)
-        kept2 = []
+        quality_kept = []
         for c in candidates:
-            score = getattr(c, "ranking_score", None)
-            c.quality_pass = score is not None and score >= min_similarity
-            if c.quality_pass: kept2.append(c)
-            else: rejected_rows.append(reject_row(c, f"ranking_score<{min_similarity}", "quality_threshold"))
-        candidates = kept2
+            passed = c.combined_similarity is not None and c.combined_similarity >= min_similarity
+            c.quality_pass = passed
+            if passed:
+                quality_kept.append(c)
+            else:
+                rejected_rows.append(reject_row(
+                    c,
+                    f"combined_similarity<{min_similarity}",
+                    "quality_threshold",
+                ))
+        candidates = quality_kept
+        print(f"  quality threshold >= {min_similarity}: {len(candidates)} kept")
     else:
-        for c in candidates: c.quality_pass = True
-    print("[6/11] Select accounts for Reel performance")
+        for c in candidates:
+            c.quality_pass = True
+
+    print("[7/12] Select accounts for Reel performance")
     pcfg = cfg.get("performance", {})
     performance_enabled = pcfg.get("enabled", True)
     top_n = int(pcfg.get("accounts_to_analyze", 30))
@@ -442,7 +470,7 @@ def main(config_path):
     reel_metrics = {}
     selected_ad_by_user = {}
     if perf_usernames:
-        print("[7/11] Reel tab scraping")
+        print("[8/12] Reel tab scraping")
         reel_items = scrape_reels(
             client=client,
             usernames=perf_usernames,
@@ -458,9 +486,9 @@ def main(config_path):
             ad_target=int(pcfg.get("ad_reels_target", 5)),
         )
     else:
-        print("[7/11] Reel tab scraping skipped")
+        print("[8/12] Reel tab scraping skipped")
 
-    print("[8/11] Commercial filter + final scoring")
+    print("[9/12] Commercial filter + final scoring")
     commercial_cfg = cfg.get("commercial_filter", {})
     final_candidates = []
     for c in candidates:
@@ -481,21 +509,21 @@ def main(config_path):
             )
         final_candidates.append(c)
 
-    # Analyzed candidates first by final score; remaining candidates keep non-visual ranking order.
+    # Analyzed candidates first by final score; remaining candidates keep combined similarity order.
     analyzed_names = {x.lower() for x in perf_usernames}
     analyzed = [c for c in final_candidates if c.username.lower() in analyzed_names]
     not_analyzed = [c for c in final_candidates if c.username.lower() not in analyzed_names]
     analyzed.sort(key=lambda c: c.score, reverse=True)
-    not_analyzed.sort(key=lambda c: getattr(c, "ranking_score", 0.0), reverse=True)
+    not_analyzed.sort(key=lambda c: c.combined_rank or 999999)
     final_candidates = analyzed + not_analyzed
 
-    print("[9/11] SQLite")
+    print("[10/12] SQLite")
     store = SQLiteStore(cfg["output"]["sqlite_path"])
     store.save_candidates(final_candidates)
     store.save_posts(profile_posts + reels)
     store.close()
 
-    print("[10/11] Excel")
+    print("[11/12] Excel")
     candidate_rows = []
     for idx, c in enumerate(final_candidates, start=1):
         t = target_meta.get(c.username.lower(), {})
