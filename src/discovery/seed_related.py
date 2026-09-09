@@ -71,6 +71,7 @@ def discover_from_seeds(
     profile_cache: dict | None = None,
     use_related_fallback: bool = True,
     related_fallback_actor_id: str = DEFAULT_RELATED_FALLBACK_ACTOR,
+    profile_actor_id: str = "dami_studio/instagram-profile-scraper",
 ):
     """
     v0.8.1:
@@ -98,7 +99,7 @@ def discover_from_seeds(
         # Reuse profiles already fetched during this run; scrape only missing.
         missing = [u for u in frontier if u.lower() not in profile_cache]
         if missing:
-            items = scrape_profiles(client, missing)
+            items = scrape_profiles(client, missing, actor_id=profile_actor_id, include_latest_posts=True)
             for item in items:
                 username = str(item.get("username", "")).strip()
                 if username:

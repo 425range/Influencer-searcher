@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 from src.config_loader import load_config
 from src.discovery.seed_related import discover_from_seeds
 from src.discovery.apify_google import discover_by_keywords
-from src.discovery.hashtag_recent import discover_by_hashtags
+from src.discovery.apify_hashtag import discover_by_hashtags
 from src.collectors.instagram_profile import scrape_profiles
 from src.collectors.profile_parser import enrich_candidate, posts_from_profile
 from src.collectors.instagram_reels import scrape_reels, reels_from_items
@@ -16,68 +16,50 @@ from src.analysis.ad_detector import mark_ads
 from src.analysis.category import build_text, category_scores
 from src.analysis.similarity import seed_similarity
 from src.analysis.target_filters import apply_targeting, evaluate_gender_target
+from src.analysis.creator_target import evaluate_creator_target
 from src.analysis.scoring import pre_score, final_score
 from src.analysis.reel_metrics import build_reel_metrics, commercial_reject_reason
-from src.textual.account_ranker import rank_candidates_text
+from src.visual.account_ranker import rank_candidates_visual
+from src.textual.account_ranker import rank_candidates_text, rank_candidates_combined
 from src.storage.sqlite_store import SQLiteStore
 from src.exporters.excel_exporter import export
 
 
 def merge_candidates(*groups):
     merged = {}
-    priority = {"seed_related": 3, "hashtag": 2, "keyword": 1}
+    priority = {"seed_related": 3, "seed_related_fallback": 3, "hashtag": 2, "keyword": 1}
     for group in groups:
         for c in group:
             key = c.username.lower()
+            if not getattr(c, "discovery_sources", None):
+                c.discovery_sources = [c.source] if c.source else []
             existing = merged.get(key)
             if existing is None:
                 merged[key] = c
-            else:
-                # Preserve all Reference-set graph hits even when the same
-                # account is also discovered by keyword search.
-                existing.reference_hits = sorted(
-                    set(getattr(existing, "reference_hits", []) or [])
-                    | set(getattr(c, "reference_hits", []) or [])
-                )
-                existing.reference_overlap_count = max(
-                    getattr(existing, "reference_overlap_count", 0),
-                    getattr(c, "reference_overlap_count", 0),
-                    len(existing.reference_hits),
-                )
-                existing.reference_overlap_ratio = max(
-                    getattr(existing, "reference_overlap_ratio", 0.0) or 0.0,
-                    getattr(c, "reference_overlap_ratio", 0.0) or 0.0,
-                )
-                if getattr(c, "graph_similarity", None) is not None:
-                    existing.graph_similarity = max(
-                        getattr(existing, "graph_similarity", 0.0) or 0.0,
-                        c.graph_similarity,
-                    )
-                if priority.get(c.source, 0) > priority.get(existing.source, 0):
-                    c.reference_hits = existing.reference_hits
-                    c.reference_overlap_count = existing.reference_overlap_count
-                    c.reference_overlap_ratio = existing.reference_overlap_ratio
-                    c.graph_similarity = existing.graph_similarity
-                    merged[key] = c
+                continue
+
+            existing.discovery_sources = sorted(set(existing.discovery_sources) | set(c.discovery_sources))
+            existing.source_hashtags = sorted(set(getattr(existing, "source_hashtags", [])) | set(getattr(c, "source_hashtags", [])))
+            existing.hashtag_discovery_posts += int(getattr(c, "hashtag_discovery_posts", 0) or 0)
+            existing.hashtag_ad_posts += int(getattr(c, "hashtag_ad_posts", 0) or 0)
+            existing.hashtag_ad_tags = sorted(set(getattr(existing, "hashtag_ad_tags", [])) | set(getattr(c, "hashtag_ad_tags", [])))
+            if existing.hashtag_discovery_posts:
+                existing.hashtag_ad_ratio = existing.hashtag_ad_posts / existing.hashtag_discovery_posts
+            existing.hashtag_latest_timestamp = max(
+                getattr(existing, "hashtag_latest_timestamp", "") or "",
+                getattr(c, "hashtag_latest_timestamp", "") or "",
+            )
+
+            existing.reference_hits = sorted(set(existing.reference_hits) | set(c.reference_hits))
+            existing.reference_overlap_count = max(existing.reference_overlap_count, c.reference_overlap_count, len(existing.reference_hits))
+            existing.reference_overlap_ratio = max(existing.reference_overlap_ratio or 0.0, c.reference_overlap_ratio or 0.0)
+            if c.graph_similarity is not None:
+                existing.graph_similarity = max(existing.graph_similarity or 0.0, c.graph_similarity)
+            if priority.get(c.source, 0) > priority.get(existing.source, 0):
+                existing.source = c.source
+                existing.source_seed = c.source_seed or existing.source_seed
+                existing.discovery_depth = c.discovery_depth or existing.discovery_depth
     return list(merged.values())
-
-
-def rank_candidates_nonvisual(candidates, cfg):
-    weights = (cfg or {}).get("weights", {})
-    signal_map = {"topic": "topic_similarity", "hashtag": "hashtag_similarity", "graph": "graph_similarity", "caption": "caption_similarity"}
-    for c in candidates:
-        parts, used = [], []
-        for name, attr in signal_map.items():
-            w = float(weights.get(name, 0.0) or 0.0)
-            v = getattr(c, attr, None)
-            if w > 0 and v is not None:
-                parts.append((float(v), w)); used.append(name)
-        denom = sum(w for _, w in parts)
-        c.ranking_score = sum(v*w for v,w in parts)/denom if denom else (c.content_similarity or c.pre_score/100.0)
-        c.ranking_signals_used = ",".join(used) if used else "content_fallback"
-    candidates.sort(key=lambda c: (getattr(c, "ranking_score", 0.0), c.content_similarity if c.content_similarity is not None else -1.0, c.pre_score), reverse=True)
-    for idx, c in enumerate(candidates, 1): c.ranking_rank = idx
-    return candidates
 
 def reject_row(candidate, reason, stage):
     return {
@@ -94,9 +76,18 @@ def reject_row(candidate, reason, stage):
 def candidate_row(c, metrics, performance_analyzed, include_hits="", soft_hits=""):
     return {
         "final_rank": None,
+        "combined_rank": c.combined_rank,
+        "visual_rank": c.visual_rank,
         "username": c.username,
         "profile_url": c.profile_url,
         "source": c.source,
+        "discovery_sources": ", ".join(c.discovery_sources),
+        "source_hashtags": ", ".join(c.source_hashtags),
+        "hashtag_discovery_posts": c.hashtag_discovery_posts,
+        "hashtag_ad_posts": c.hashtag_ad_posts,
+        "hashtag_ad_ratio": c.hashtag_ad_ratio,
+        "hashtag_ad_tags": ", ".join(c.hashtag_ad_tags),
+        "hashtag_latest_timestamp": c.hashtag_latest_timestamp,
         "source_seed": c.source_seed,
         "discovery_depth": c.discovery_depth,
         "reference_hits": ", ".join(c.reference_hits),
@@ -105,11 +96,21 @@ def candidate_row(c, metrics, performance_analyzed, include_hits="", soft_hits="
         "graph_similarity": c.graph_similarity,
         "display_name": c.display_name,
         "followers": c.followers,
+        "follower_in_range": c.follower_in_range,
+        "targeting_flag": c.targeting_flag,
+        "category_flag": c.category_flag,
+        "commercial_flag": c.commercial_flag,
         "bio": c.bio,
         "include_keyword_hits": include_hits,
         "soft_exclude_hits": soft_hits,
         "seed_similarity_legacy": c.seed_similarity,
         "pre_score": c.pre_score,
+        "visual_similarity": c.visual_similarity,
+        "visual_reference_similarity": c.visual_reference_similarity,
+        "visual_post_median_similarity": c.visual_post_median_similarity,
+        "nearest_visual_reference": c.nearest_visual_reference,
+        "visual_negative_similarity": c.visual_negative_similarity,
+        "visual_target_margin": c.visual_target_margin,
         "caption_similarity": c.caption_similarity,
         "nearest_text_reference": c.nearest_text_reference,
         "hashtag_similarity": c.hashtag_similarity,
@@ -124,8 +125,10 @@ def candidate_row(c, metrics, performance_analyzed, include_hits="", soft_hits="
         "gender_signal": c.gender_signal,
         "gender_target_match": c.gender_target_match,
         "gender_evidence": c.gender_evidence,
-        "ranking_score": getattr(c, "ranking_score", None),
-        "ranking_rank": getattr(c, "ranking_rank", None),
+        "creator_target_fit": c.creator_target_fit,
+        "creator_target_gate": c.creator_target_gate,
+        "creator_target_reason": c.creator_target_reason,
+        "combined_similarity": c.combined_similarity,
         "ranking_signals_used": c.ranking_signals_used,
         "quality_pass": c.quality_pass,
         "performance_analyzed": performance_analyzed,
@@ -190,6 +193,8 @@ def main(config_path):
 
     client = ApifyClient(token)
     dcfg = cfg["discovery"]
+    profile_actor_id = dcfg.get("profile_actor_id", "dami_studio/instagram-profile-scraper")
+    profile_include_latest_posts = bool(dcfg.get("profile_include_latest_posts", True))
     filters = cfg["filters"]
     targeting = cfg.get("targeting", {})
     seeds = [x.strip().lstrip("@") for x in dcfg.get("seed_usernames", [])]
@@ -203,7 +208,7 @@ def main(config_path):
     rejected_rows = []
     print(f"  references: positive={len(seeds)}, negative={len(negative_refs)}")
 
-    print("[1/11] Candidate discovery")
+    print("[1/12] Candidate discovery")
     # Cache Reference profile responses from discovery so the enrichment stage
     # does not pay to scrape the same References again.
     discovery_profile_cache = {}
@@ -219,9 +224,22 @@ def main(config_path):
             "related_fallback_actor_id",
             "instagram-scraper/instagram-related-profiles",
         ),
+        profile_actor_id=profile_actor_id,
     )
+    hashtag_candidates = []
+    if dcfg.get("use_hashtag_search", True):
+        hashtag_candidates = discover_by_hashtags(
+            client=client,
+            hashtags=dcfg.get("hashtags", []),
+            actor_id=dcfg.get("hashtag_actor_id", "publicsignallabs/instagram-hashtag-scraper"),
+            results_limit_per_hashtag=int(dcfg.get("hashtag_results_limit", 100)),
+            get_posts=bool(dcfg.get("hashtag_get_posts", True)),
+            get_reels=bool(dcfg.get("hashtag_get_reels", True)),
+            ad_signal_tags=dcfg.get("hashtag_ad_signal_tags", cfg["analysis"].get("ad_keywords", [])),
+        )
+
     keyword_candidates = []
-    if dcfg.get("use_keyword_search", True):
+    if dcfg.get("use_keyword_search", False):
         keyword_candidates = discover_by_keywords(
             client=client,
             queries=dcfg.get("queries", []),
@@ -229,25 +247,15 @@ def main(config_path):
             max_pages_per_query=dcfg.get("max_pages_per_query", 1),
             result_limit=dcfg.get("keyword_result_limit", 50),
         )
-    hashtag_candidates = []
-    hashtag_stats = {}
-    if dcfg.get("use_hashtag_search", False):
-        hashtag_candidates, hashtag_stats = discover_by_hashtags(
-            client=client,
-            hashtags=dcfg.get("hashtags", []),
-            actor_id=dcfg.get("hashtag_actor_id", "apify/instagram-hashtag-scraper"),
-            initial_posts=int(dcfg.get("hashtag_initial_posts", 100)),
-            max_posts=int(dcfg.get("hashtag_max_posts", 300)),
-            target_valid_candidates=int(dcfg.get("hashtag_target_valid_candidates", 10)),
-            min_followers=int(filters["min_followers"]),
-            max_followers=int(filters["max_followers"]),
-            expand_search=bool(dcfg.get("hashtag_expand_search", False)),
-            allow_unknown_followers=bool(dcfg.get("hashtag_allow_unknown_followers", False)),
-        )
-    candidates = merge_candidates(seed_candidates, keyword_candidates, hashtag_candidates)
-    print(f"  discovery summary: related={len(seed_candidates)}, google={len(keyword_candidates)}, hashtag={len(hashtag_candidates)}, merged_unique={len(candidates)}")
 
-    print("[2/11] Profile enrichment")
+    candidates = merge_candidates(seed_candidates, hashtag_candidates, keyword_candidates)
+    print(
+        f"  discovery summary: related={len(seed_candidates)}, "
+        f"hashtag={len(hashtag_candidates)}, google={len(keyword_candidates)}, "
+        f"merged_unique={len(candidates)}"
+    )
+
+    print("[2/12] Profile enrichment")
     all_needed = list(dict.fromkeys(
         [c.username for c in candidates] + seeds + negative_refs
     ))
@@ -264,7 +272,11 @@ def main(config_path):
             f"  profile enrichment: cached={len(item_by_username)}, "
             f"scraping_missing={len(missing_profiles)}"
         )
-        profile_items = scrape_profiles(client, missing_profiles)
+        profile_items = scrape_profiles(
+            client, missing_profiles,
+            actor_id=profile_actor_id,
+            include_latest_posts=profile_include_latest_posts,
+        )
         for item in profile_items:
             username = str(item.get("username", "")).strip()
             if username:
@@ -283,20 +295,20 @@ def main(config_path):
 
     profile_posts = []
     enriched = []
+    unavailable_candidates = []
     for c in candidates:
         item = item_by_username.get(c.username.lower())
         if not item:
-            if filters.get("allow_unknown_followers", False):
-                enriched.append(c)
-            else:
-                rejected_rows.append(reject_row(c, "profile_not_found", "profile"))
+            c.status = "profile_unavailable"
+            c.targeting_flag = "profile_not_found"
+            unavailable_candidates.append(c)
             continue
         c = enrich_candidate(c, item)
         user_posts = posts_from_profile(item)
         profile_posts.extend(user_posts)
         enriched.append(c)
 
-    print("[3/11] Hard filters + category")
+    print("[3/12] Hard filters + category")
     # Reuse the already-scraped profile captions for both ad exclusion and text similarity.
     profile_posts = mark_ads(profile_posts, cfg["analysis"]["ad_keywords"])
     profile_posts_by_user = defaultdict(list)
@@ -330,16 +342,13 @@ def main(config_path):
         if c.username.lower() in seed_set and not filters.get("include_seed_accounts", False):
             continue
         if c.username.lower() in negative_ref_set:
-            rejected_rows.append(reject_row(c, "listed_as_negative_reference", "reference_filter"))
+            # Negative references are controls, not discovery candidates.
             continue
 
         if c.followers is None:
-            if not filters.get("allow_unknown_followers", False):
-                rejected_rows.append(reject_row(c, "unknown_followers", "hard_filter"))
-                continue
-        elif not (filters["min_followers"] <= c.followers <= filters["max_followers"]):
-            rejected_rows.append(reject_row(c, "followers_out_of_range", "hard_filter"))
-            continue
+            c.follower_in_range = None
+        else:
+            c.follower_in_range = bool(filters["min_followers"] <= c.followers <= filters["max_followers"])
 
         user_posts = profile_posts_by_user.get(c.username.lower(), [])
         text = build_text(c.bio, [p.caption for p in user_posts])
@@ -359,16 +368,12 @@ def main(config_path):
         c.gender_target_match = gender_meta["gender_target_match"]
         c.gender_evidence = gender_meta["gender_evidence"]
 
+        flags = []
         if t["hard_reject"]:
-            rejected_rows.append(reject_row(c, "hard_exclude:" + ",".join(t["hard_exclude_hits"]), "targeting"))
-            continue
-
+            flags.append("hard_exclude:" + ",".join(t["hard_exclude_hits"]))
         if gender_meta["gender_reject"]:
-            reason = "gender_target_mismatch:" + gender_meta["gender_signal"]
-            if gender_meta["gender_evidence"]:
-                reason += ":" + gender_meta["gender_evidence"]
-            rejected_rows.append(reject_row(c, reason, "gender_filter"))
-            continue
+            flags.append("gender_target_mismatch:" + gender_meta["gender_signal"])
+        c.targeting_flag = " | ".join(flags)
 
         c.category_scores = category_scores(text, cfg["analysis"]["category_keywords"])
 
@@ -379,12 +384,7 @@ def main(config_path):
             if c.category_scores.get(name, 0.0) >= exclude_threshold
         ]
         if category_rejects:
-            rejected_rows.append(reject_row(
-                c,
-                "hard_exclude_category:" + ",".join(category_rejects),
-                "targeting",
-            ))
-            continue
+            c.category_flag = "hard_exclude_category:" + ",".join(category_rejects)
 
         c.seed_similarity = seed_similarity(c, seed_texts)
         c.pre_score = pre_score(
@@ -398,7 +398,7 @@ def main(config_path):
     candidates = kept
     print(f"  after filters: {len(candidates)}")
 
-    print("[4/11] Caption + hashtag similarity")
+    print("[4/12] Caption + hashtag similarity")
     text_cfg = cfg.get("text_similarity", {})
     if text_cfg.get("enabled", True) and candidates:
         candidates = rank_candidates_text(
@@ -414,23 +414,47 @@ def main(config_path):
     else:
         print("  text similarity skipped")
 
-    print("[5/11] Non-visual target/ranking")
+    print("[5/12] SigLIP visual similarity")
+    if cfg.get("visual", {}).get("enabled", True) and candidates:
+        candidates = rank_candidates_visual(
+            candidates,
+            item_by_username,
+            seeds,
+            cfg["visual"],
+            cfg.get("reference_matching", {}),
+            negative_usernames=negative_refs,
+        )
+    else:
+        for c in candidates:
+            c.visual_similarity = None
+            c.visual_rank = None
+
+    print("[6/12] Creator Target Gate + combined ranking")
+    gate_cfg = cfg.get("creator_target_gate", {})
+    for c in candidates:
+        meta = evaluate_creator_target(c, gate_cfg)
+        c.creator_target_fit = meta["creator_target_fit"]
+        c.creator_target_gate = meta["creator_target_gate"]
+        c.creator_target_reason = meta["creator_target_reason"]
+    print(f"  creator target scored (no reject): {len(candidates)}")
+
     if candidates:
-        candidates = rank_candidates_nonvisual(candidates, cfg.get("similarity_ranking", {}))
+        candidates = rank_candidates_combined(candidates, cfg.get("similarity_ranking", {}))
+
+    # Optional quality threshold. Do not force-fill the requested result count
+    # with weak candidates.
     qcfg = cfg.get("similarity_ranking", {})
-    min_similarity = qcfg.get("min_ranking_score")
+    min_similarity = qcfg.get("min_combined_similarity")
     if min_similarity is not None and str(min_similarity).strip() != "":
         min_similarity = float(min_similarity)
-        kept2 = []
         for c in candidates:
-            score = getattr(c, "ranking_score", None)
-            c.quality_pass = score is not None and score >= min_similarity
-            if c.quality_pass: kept2.append(c)
-            else: rejected_rows.append(reject_row(c, f"ranking_score<{min_similarity}", "quality_threshold"))
-        candidates = kept2
+            c.quality_pass = bool(c.combined_similarity is not None and c.combined_similarity >= min_similarity)
+        print(f"  quality threshold >= {min_similarity}: flag only, no reject")
     else:
-        for c in candidates: c.quality_pass = True
-    print("[6/11] Select accounts for Reel performance")
+        for c in candidates:
+            c.quality_pass = True
+
+    print("[7/12] Select accounts for Reel performance")
     pcfg = cfg.get("performance", {})
     performance_enabled = pcfg.get("enabled", True)
     top_n = int(pcfg.get("accounts_to_analyze", 30))
@@ -442,7 +466,7 @@ def main(config_path):
     reel_metrics = {}
     selected_ad_by_user = {}
     if perf_usernames:
-        print("[7/11] Reel tab scraping")
+        print("[8/12] Reel tab scraping")
         reel_items = scrape_reels(
             client=client,
             usernames=perf_usernames,
@@ -458,9 +482,9 @@ def main(config_path):
             ad_target=int(pcfg.get("ad_reels_target", 5)),
         )
     else:
-        print("[7/11] Reel tab scraping skipped")
+        print("[8/12] Reel tab scraping skipped")
 
-    print("[8/11] Commercial filter + final scoring")
+    print("[9/12] Commercial filter + final scoring")
     commercial_cfg = cfg.get("commercial_filter", {})
     final_candidates = []
     for c in candidates:
@@ -468,9 +492,7 @@ def main(config_path):
         metrics = reel_metrics.get(c.username.lower(), {})
         if analyzed:
             reason = commercial_reject_reason(metrics, commercial_cfg)
-            if reason:
-                rejected_rows.append(reject_row(c, reason, "commercial_filter"))
-                continue
+            c.commercial_flag = reason or ""
             t = target_meta.get(c.username.lower(), {})
             c.score = final_score(
                 c,
@@ -481,21 +503,21 @@ def main(config_path):
             )
         final_candidates.append(c)
 
-    # Analyzed candidates first by final score; remaining candidates keep non-visual ranking order.
+    # Analyzed candidates first by final score; remaining candidates keep combined similarity order.
     analyzed_names = {x.lower() for x in perf_usernames}
     analyzed = [c for c in final_candidates if c.username.lower() in analyzed_names]
     not_analyzed = [c for c in final_candidates if c.username.lower() not in analyzed_names]
     analyzed.sort(key=lambda c: c.score, reverse=True)
-    not_analyzed.sort(key=lambda c: getattr(c, "ranking_score", 0.0), reverse=True)
-    final_candidates = analyzed + not_analyzed
+    not_analyzed.sort(key=lambda c: c.combined_rank or 999999)
+    final_candidates = analyzed + not_analyzed + unavailable_candidates
 
-    print("[9/11] SQLite")
+    print("[10/12] SQLite")
     store = SQLiteStore(cfg["output"]["sqlite_path"])
     store.save_candidates(final_candidates)
     store.save_posts(profile_posts + reels)
     store.close()
 
-    print("[10/11] Excel")
+    print("[11/12] Excel")
     candidate_rows = []
     for idx, c in enumerate(final_candidates, start=1):
         t = target_meta.get(c.username.lower(), {})
@@ -513,13 +535,12 @@ def main(config_path):
     export(
         candidate_rows,
         reel_rows(reels, selected_ad_by_user),
-        rejected_rows,
         cfg["output"]["excel_path"],
     )
 
     print("\nDONE")
-    print(f"Candidates kept: {len(final_candidates)}")
-    print(f"Rejected: {len(rejected_rows)}")
+    print(f"Candidates exported: {len(final_candidates)}")
+    print("Rejected: disabled in MVP v0.9 (signals are columns)")
     print(f"Reels scraped: {len(reels)}")
     print(f"Excel: {cfg['output']['excel_path']}")
 

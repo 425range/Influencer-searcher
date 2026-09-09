@@ -383,21 +383,55 @@ def rank_candidates_text(
 
 
 def rank_candidates_combined(candidates, cfg: dict):
+    """
+    v0.8 dynamic ranking.
+
+    Default:
+      Visual 60%
+      Topic profile 25%
+      Hashtag 10%
+      Graph 5%
+
+    Raw caption cosine is NOT used by default.
+    Missing signals are removed and remaining weights are re-normalized.
+    """
     weights = cfg.get("weights", {}) or {}
-    topic_weight = float(weights.get("topic", 0.55))
-    hashtag_weight = float(weights.get("hashtag", 0.20))
-    graph_weight = float(weights.get("graph", 0.15))
-    caption_weight = float(weights.get("caption", 0.10))
+    visual_weight = float(weights.get("visual", 0.60))
+    topic_weight = float(weights.get("topic", 0.25))
+    hashtag_weight = float(weights.get("hashtag", 0.10))
+    graph_weight = float(weights.get("graph", 0.05))
+    caption_weight = float(weights.get("caption", 0.0))
+
     for c in candidates:
         parts = []
-        if c.topic_similarity is not None: parts.append(("topic", c.topic_similarity, topic_weight))
-        if c.hashtag_similarity is not None: parts.append(("hashtag", c.hashtag_similarity, hashtag_weight))
-        if c.graph_similarity is not None: parts.append(("graph", c.graph_similarity, graph_weight))
-        if caption_weight > 0 and c.caption_similarity is not None: parts.append(("caption_raw", c.caption_similarity, caption_weight))
+        if c.visual_similarity is not None:
+            parts.append(("visual", c.visual_similarity, visual_weight))
+        if c.topic_similarity is not None:
+            parts.append(("topic", c.topic_similarity, topic_weight))
+        if c.hashtag_similarity is not None:
+            parts.append(("hashtag", c.hashtag_similarity, hashtag_weight))
+        if c.graph_similarity is not None:
+            parts.append(("graph", c.graph_similarity, graph_weight))
+        if caption_weight > 0 and c.caption_similarity is not None:
+            parts.append(("caption_raw", c.caption_similarity, caption_weight))
+
         active = [(name, score, w) for name, score, w in parts if w > 0]
         denom = sum(w for _, _, w in active)
-        c.combined_similarity = sum(score*w for _, score, w in active)/denom if denom else c.content_similarity
+
+        c.combined_similarity = (
+            sum(score * w for _, score, w in active) / denom if denom else None
+        )
         c.ranking_signals_used = ", ".join(name for name, _, _ in active)
-    ranked = sorted(candidates, key=lambda c: (c.combined_similarity is not None, c.combined_similarity if c.combined_similarity is not None else -1, c.pre_score), reverse=True)
-    for rank, c in enumerate(ranked, 1): c.combined_rank = rank
+
+    ranked = sorted(
+        candidates,
+        key=lambda c: (
+            c.combined_similarity is not None,
+            c.combined_similarity if c.combined_similarity is not None else -1,
+            c.pre_score,
+        ),
+        reverse=True,
+    )
+    for rank, c in enumerate(ranked, start=1):
+        c.combined_rank = rank
     return ranked

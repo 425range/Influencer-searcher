@@ -1,7 +1,7 @@
 from typing import Iterable
 from apify_client import ApifyClient
 
-PROFILE_ACTOR_ID = "apify/instagram-profile-scraper"
+PROFILE_ACTOR_ID = "dami_studio/instagram-profile-scraper"
 
 
 def _dataset_id(run):
@@ -13,7 +13,7 @@ def _dataset_id(run):
     return dataset_id
 
 
-def scrape_profiles(client: ApifyClient, usernames: Iterable[str]) -> list[dict]:
+def scrape_profiles(client: ApifyClient, usernames: Iterable[str], actor_id: str = PROFILE_ACTOR_ID, include_latest_posts: bool = True) -> list[dict]:
     usernames = list(dict.fromkeys(
         u.strip().lstrip("@")
         for u in usernames
@@ -22,8 +22,11 @@ def scrape_profiles(client: ApifyClient, usernames: Iterable[str]) -> list[dict]
     if not usernames:
         return []
 
-    run = client.actor(PROFILE_ACTOR_ID).call(
-        run_input={"usernames": usernames}
+    run = client.actor(actor_id).call(
+        run_input={
+            "usernames": usernames,
+            "includeLatestPosts": bool(include_latest_posts),
+        }
     )
     if run is None:
         raise RuntimeError("Instagram Profile Scraper failed.")

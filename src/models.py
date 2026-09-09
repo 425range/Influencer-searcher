@@ -9,6 +9,21 @@ class Candidate:
     source: str = ""
     source_seed: str = ""
     discovery_depth: int = 0
+    discovery_sources: List[str] = field(default_factory=list)
+
+    # Hashtag discovery evidence
+    source_hashtags: List[str] = field(default_factory=list)
+    hashtag_discovery_posts: int = 0
+    hashtag_ad_posts: int = 0
+    hashtag_ad_tags: List[str] = field(default_factory=list)
+    hashtag_ad_ratio: float = 0.0
+    hashtag_latest_timestamp: str = ""
+
+    # MVP: keep candidates and expose filter/gate signals instead of rejecting
+    follower_in_range: Optional[bool] = None
+    targeting_flag: str = ""
+    category_flag: str = ""
+    commercial_flag: str = ""
 
     # v0.7 graph/reference-set metadata
     reference_hits: List[str] = field(default_factory=list)
@@ -26,6 +41,14 @@ class Candidate:
     seed_similarity: float = 0.0
     pre_score: float = 0.0
 
+    # Visual
+    visual_similarity: Optional[float] = None
+    visual_reference_similarity: Optional[float] = None
+    visual_post_median_similarity: Optional[float] = None
+    nearest_visual_reference: str = ""
+    visual_rank: Optional[int] = None
+    visual_negative_similarity: Optional[float] = None
+    visual_target_margin: Optional[float] = None
 
     # Text / hashtag
     caption_similarity: Optional[float] = None
@@ -43,6 +66,9 @@ class Candidate:
     gender_signal: str = ""
     gender_target_match: Optional[bool] = None
     gender_evidence: str = ""
+    creator_target_fit: Optional[float] = None
+    creator_target_gate: str = ""
+    creator_target_reason: str = ""
 
     # Dynamic reference-set ranking
     combined_similarity: Optional[float] = None

@@ -60,7 +60,7 @@ class ScrollText(tk.Text):
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Influencer Discovery PoC v0.8.2")
+        self.title("Influencer Discovery PoC v0.9")
         self.geometry("1120x900")
         self.minsize(980, 760)
 
@@ -264,7 +264,7 @@ class App(tk.Tk):
         ).pack(side="left")
         tk.Label(
             title_box,
-            text="  v0.8.2 GUI",
+            text="  v0.9 GUI",
             bg=c["header"],
             fg="#BFDBFE",
             font=("Segoe UI", 10, "bold"),
@@ -367,21 +367,25 @@ class App(tk.Tk):
         self.tab_campaign_outer = ttk.Frame(self.notebook, style="Card.TFrame")
         self.tab_target_outer = ttk.Frame(self.notebook, style="Card.TFrame")
         self.tab_content_outer = ttk.Frame(self.notebook, style="Card.TFrame")
+        self.tab_visual_outer = ttk.Frame(self.notebook, style="Card.TFrame")
         self.tab_performance_outer = ttk.Frame(self.notebook, style="Card.TFrame")
 
         self.notebook.add(self.tab_campaign_outer, text="캠페인 / Discovery")
         self.notebook.add(self.tab_target_outer, text="타겟 / 제외")
         self.notebook.add(self.tab_content_outer, text="Content 유사도")
+        self.notebook.add(self.tab_visual_outer, text="Visual")
         self.notebook.add(self.tab_performance_outer, text="Reel / 광고 성과")
 
         self.tab_campaign = self._make_scrollable_tab(self.tab_campaign_outer)
         self.tab_target = self._make_scrollable_tab(self.tab_target_outer)
         self.tab_content = self._make_scrollable_tab(self.tab_content_outer)
+        self.tab_visual = self._make_scrollable_tab(self.tab_visual_outer)
         self.tab_performance = self._make_scrollable_tab(self.tab_performance_outer)
 
         self._build_campaign_tab()
         self._build_target_tab()
         self._build_content_tab()
+        self._build_visual_tab()
         self._build_performance_tab()
 
 
@@ -507,26 +511,23 @@ class App(tk.Tk):
         self.seed_depth = tk.StringVar()
         self.max_related = tk.StringVar()
         self.max_seed_candidates = tk.StringVar()
-        self.use_keyword_search = tk.BooleanVar(value=True)
+        self.use_keyword_search = tk.BooleanVar(value=False)
         self.use_hashtag_search = tk.BooleanVar(value=True)
-        self.hashtag_initial_posts = tk.StringVar()
-        self.hashtag_target_valid = tk.StringVar()
-        self.hashtag_max_posts = tk.StringVar()
-        self.hashtag_expand_search = tk.BooleanVar(value=False)
+        self.hashtag_results_limit = tk.StringVar()
+        self.hashtag_get_posts = tk.BooleanVar(value=True)
+        self.hashtag_get_reels = tk.BooleanVar(value=True)
 
         r = 0
         self._entry(f, r, "캠페인명", self.campaign_name); r += 1
         self._entry(f, r, "제품 / 브랜드", self.product); r += 1
         self.seed_usernames = self._text_area(f, r, "레퍼런스 계정", 4, "한 줄에 하나씩 Instagram username 입력"); r += 1
-        self.search_queries = self._text_area(f, r, "후보 검색 문구", 5, "Google에서 Instagram 후보 프로필을 추가 발견할 때 사용"); r += 1
+        self.hashtags = self._text_area(f, r, "해시태그 검색", 5, "# 없이 한 줄에 하나. 게시물/릴스 작성자를 후보로 추가"); r += 1
+        self.hashtag_ad_tags = self._text_area(f, r, "광고 신호 해시태그", 4, "예: 광고, 협찬, 제품제공, 유료광고. 같은 게시물에 함께 있으면 기록"); r += 1
 
-        ttk.Checkbutton(f, text="키워드 검색 사용", variable=self.use_keyword_search, style="TCheckbutton").grid(row=r, column=1, sticky="w", pady=5); r += 1
-        self.hashtags = self._text_area(f, r, "해시태그 검색", 4, "# 없이 한 줄에 하나. 최근 게시물 작성자의 팔로워를 먼저 확인", tone="info"); r += 1
-        ttk.Checkbutton(f, text="해시태그 최근 게시물 검색 사용", variable=self.use_hashtag_search, style="TCheckbutton").grid(row=r, column=1, sticky="w", pady=5); r += 1
-        self._entry(f, r, "해시태그당 최초 게시물", self.hashtag_initial_posts, help_text="첫 테스트 권장: 100"); r += 1
-        self._entry(f, r, "목표 적합 후보 수", self.hashtag_target_valid); r += 1
-        self._entry(f, r, "해시태그당 최대 게시물", self.hashtag_max_posts); r += 1
-        ttk.Checkbutton(f, text="목표 미달 시 검색량 확장 (추가 비용 주의)", variable=self.hashtag_expand_search, style="TCheckbutton").grid(row=r, column=1, sticky="w", pady=5); r += 1
+        ttk.Checkbutton(f, text="해시태그 검색 사용", variable=self.use_hashtag_search, style="TCheckbutton").grid(row=r, column=1, sticky="w", pady=5); r += 1
+        self._entry(f, r, "해시태그당 게시물 수", self.hashtag_results_limit, help_text="MVP 권장 50~100"); r += 1
+        ttk.Checkbutton(f, text="일반 게시물 포함", variable=self.hashtag_get_posts).grid(row=r, column=1, sticky="w", pady=4); r += 1
+        ttk.Checkbutton(f, text="Reels 포함", variable=self.hashtag_get_reels).grid(row=r, column=1, sticky="w", pady=4); r += 1
         self._entry(f, r, "최소 팔로워", self.min_followers, help_text="예: 30000"); r += 1
         self._entry(f, r, "최대 팔로워", self.max_followers, help_text="예: 500000"); r += 1
         self._entry(f, r, "추천 확장 Depth", self.seed_depth, help_text="1=직접 추천, 2=추천의 추천"); r += 1
@@ -538,14 +539,14 @@ class App(tk.Tk):
         f.columnconfigure(1, weight=1)
 
         self.include_keywords = self._text_area(f, 0, "포함 키워드", 6, "카테고리 적합도 및 후보 평가에 사용", tone="info")
-        self.hard_exclude_keywords = self._text_area(f, 1, "Hard 제외 키워드", 6, "매칭 시 후보에서 즉시 제외", tone="danger")
+        self.hard_exclude_keywords = self._text_area(f, 1, "제외 신호 키워드", 6, "MVP에서는 삭제하지 않고 targeting_flag로 표시", tone="danger")
         self.soft_exclude_keywords = self._text_area(f, 2, "Soft 제외 키워드", 5, "후보는 유지하지만 점수 감점", tone="warning")
 
         self.soft_penalty = tk.StringVar()
         self.hard_category_threshold = tk.StringVar()
         self.gender_target_display = tk.StringVar(value="전체")
         self._entry(f, 3, "Soft 제외 감점", self.soft_penalty, help_text="0~1, 예: 0.10")
-        self.hard_exclude_categories = self._text_area(f, 4, "Hard 제외 카테고리", 4, "예: parenting")
+        self.hard_exclude_categories = self._text_area(f, 4, "제외 신호 카테고리", 4, "MVP에서는 삭제하지 않고 category_flag로 표시")
         self._entry(f, 5, "카테고리 제외 기준", self.hard_category_threshold, help_text="예: 0.20")
 
         ttk.Separator(f).grid(row=6, column=0, columnspan=3, sticky="ew", pady=14)
@@ -565,6 +566,35 @@ class App(tk.Tk):
             wraplength=320,
         ).grid(row=7, column=2, sticky="w", padx=12)
 
+        ttk.Separator(f).grid(row=8, column=0, columnspan=3, sticky="ew", pady=14)
+        ttk.Label(f, text="Creator Target Gate", style="Section.Card.TLabel").grid(row=9, column=0, columnspan=2, sticky="w")
+
+        self.creator_gate_enabled = tk.BooleanVar(value=True)
+        self.min_visual_reference = tk.StringVar()
+        self.min_visual_median = tk.StringVar()
+        self.min_topic_similarity = tk.StringVar()
+        self.min_target_fit = tk.StringVar()
+        self.negative_margin_reject = tk.StringVar()
+
+        ttk.Checkbutton(
+            f,
+            text="Reference 기반 Creator Target 점수/플래그 사용 (삭제 안 함)",
+            variable=self.creator_gate_enabled,
+        ).grid(row=10, column=1, sticky="w", pady=7)
+
+        self._entry(f, 11, "최소 Visual Reference", self.min_visual_reference, help_text="기본 0.89")
+        self._entry(f, 12, "최소 Visual 게시물 중앙값", self.min_visual_median, help_text="기본 0.82")
+        self._entry(f, 13, "최소 Topic Similarity", self.min_topic_similarity, help_text="기본 0.50")
+        self._entry(f, 14, "최소 Creator Target Fit", self.min_target_fit, help_text="기본 0.52")
+        self._entry(f, 15, "Negative Reference 마진", self.negative_margin_reject, help_text="기본 -0.02")
+
+        ttk.Label(
+            f,
+            text="얼굴 성별을 판별하지 않습니다. Positive/Negative Reference와 계정 전체 Visual·Topic 패턴을 비교해 타깃 적합도를 판단합니다.",
+            style="Muted.Card.TLabel",
+            wraplength=720,
+        ).grid(row=16, column=0, columnspan=3, sticky="w", pady=(12, 0))
+
     def _build_content_tab(self):
         f = self.tab_content
         f.columnconfigure(1, weight=1)
@@ -580,6 +610,7 @@ class App(tk.Tk):
         self.stop_hashtags = None
         self.reference_top_k = tk.StringVar()
         self.negative_references = None
+        self.rank_visual_weight = tk.StringVar()
         self.rank_topic_weight = tk.StringVar()
         self.rank_caption_weight = tk.StringVar()
         self.rank_hashtag_weight = tk.StringVar()
@@ -597,13 +628,14 @@ class App(tk.Tk):
         self.stop_hashtags = self._text_area(f, 8, "무시할 Hashtag", 5, "# 없이 입력. 광고/범용 태그를 비교에서 제외", tone="warning")
 
         ttk.Separator(f).grid(row=9, column=0, columnspan=3, sticky="ew", pady=14)
-        ttk.Label(f, text="Reference Set + Non-visual Ranking", style="Section.Card.TLabel").grid(row=10, column=0, columnspan=2, sticky="w")
+        ttk.Label(f, text="Reference Set + Dynamic Ranking", style="Section.Card.TLabel").grid(row=10, column=0, columnspan=2, sticky="w")
         self._entry(f, 11, "가까운 Reference Top K", self.reference_top_k, help_text="예: 2 → 가장 가까운 Positive Reference 2명 평균")
         self.negative_references = self._text_area(
             f, 12, "Negative Reference (선택)", 4,
             "마케터가 '타깃 아님'으로 판단한 계정. Discovery에는 사용하지 않고 비교 기준으로만 사용",
             tone="warning",
         )
+        self._entry(f, 13, "Visual 가중치", self.rank_visual_weight, help_text="기본 0.60")
         self._entry(f, 14, "Topic Profile 가중치", self.rank_topic_weight, help_text="기본 0.25")
         self._entry(f, 15, "Hashtag 가중치", self.rank_hashtag_weight, help_text="기본 0.10")
         self._entry(f, 16, "Graph 가중치", self.rank_graph_weight, help_text="기본 0.05")
@@ -617,12 +649,33 @@ class App(tk.Tk):
         )
         ttk.Label(f, text=note, style="Muted.Card.TLabel", wraplength=760).grid(row=19, column=0, columnspan=3, sticky="w", pady=(18, 0))
 
+    def _build_visual_tab(self):
+        f = self.tab_visual
+        f.columnconfigure(1, weight=1)
+
+        self.visual_enabled = tk.BooleanVar(value=True)
+        self.visual_model = tk.StringVar()
+        self.images_per_account = tk.StringVar()
+        self.visual_batch_size = tk.StringVar()
+        self.accounts_to_analyze = tk.StringVar()
+
+        ttk.Checkbutton(f, text="SigLIP Visual 분석 사용", variable=self.visual_enabled).grid(row=0, column=1, sticky="w", pady=7)
+        self._entry(f, 1, "모델", self.visual_model, width=42)
+        self._entry(f, 2, "계정당 대표 이미지", self.images_per_account, help_text="최근 서로 다른 게시물 대표 이미지 수")
+        self._entry(f, 3, "Batch Size", self.visual_batch_size)
+        self._entry(f, 4, "Reel 분석 대상 Top N", self.accounts_to_analyze, help_text="Visual + Content 통합 랭킹 상위 몇 명을 상세 분석할지")
+
+        note = (
+            "Visual 분석은 기존 Profile Scraper에서 확보한 최근 게시물 대표 이미지를 사용합니다. "
+            "Carousel은 게시물당 대표 이미지 1장만 사용합니다."
+        )
+        ttk.Label(f, text=note, style="Muted.Card.TLabel", wraplength=700).grid(row=5, column=0, columnspan=3, sticky="w", pady=(18, 0))
+
     def _build_performance_tab(self):
         f = self.tab_performance
         f.columnconfigure(1, weight=1)
 
         self.performance_enabled = tk.BooleanVar(value=True)
-        self.accounts_to_analyze = tk.StringVar()
         self.ad_reels_target = tk.StringVar()
         self.max_reels_to_scan = tk.StringVar()
         self.only_posts_newer_than = tk.StringVar()
@@ -635,7 +688,6 @@ class App(tk.Tk):
         self.reject_no_reel_data = tk.BooleanVar(value=False)
 
         ttk.Checkbutton(f, text="Reel 광고 성과 분석 사용", variable=self.performance_enabled).grid(row=0, column=1, sticky="w", pady=6)
-        self._entry(f, 1, "Reel 분석 대상 Top N", self.accounts_to_analyze, help_text="Non-visual 랭킹 상위 N명")
         self._entry(f, 1, "최근 광고 Reel N개", self.ad_reels_target, help_text="예: 5 → 최근 광고 Reel 5개의 평균/중앙값")
         self._entry(f, 2, "계정당 Reel 최대 탐색", self.max_reels_to_scan, help_text="비용 보호 장치, 예: 30")
         self._entry(f, 3, "최대 조회 기간", self.only_posts_newer_than, help_text='예: 12 months, 6 months')
@@ -682,20 +734,21 @@ class App(tk.Tk):
         txt = c.get("text_similarity", {})
         sim = c.get("similarity_ranking", {})
         ref = c.get("reference_matching", {})
+        v = c.get("visual", {})
         p = c.get("performance", {})
         cf = c.get("commercial_filter", {})
+        gate = c.get("creator_target_gate", {})
 
         self.campaign_name.set(campaign.get("name", ""))
         self.product.set(campaign.get("product", ""))
         self._set_text(self.seed_usernames, join_list(d.get("seed_usernames", [])))
-        self._set_text(self.search_queries, join_list(d.get("queries", [])))
-        self.use_keyword_search.set(bool(d.get("use_keyword_search", True)))
-        self.use_hashtag_search.set(bool(d.get("use_hashtag_search", True)))
         self._set_text(self.hashtags, join_list(d.get("hashtags", [])))
-        self.hashtag_initial_posts.set(str(d.get("hashtag_initial_posts", 100)))
-        self.hashtag_target_valid.set(str(d.get("hashtag_target_valid_candidates", 10)))
-        self.hashtag_max_posts.set(str(d.get("hashtag_max_posts", 300)))
-        self.hashtag_expand_search.set(bool(d.get("hashtag_expand_search", False)))
+        self._set_text(self.hashtag_ad_tags, join_list(d.get("hashtag_ad_signal_tags", ["광고", "협찬", "제품제공", "유료광고"])))
+        self.use_hashtag_search.set(bool(d.get("use_hashtag_search", True)))
+        self.hashtag_results_limit.set(str(d.get("hashtag_results_limit", 100)))
+        self.hashtag_get_posts.set(bool(d.get("hashtag_get_posts", True)))
+        self.hashtag_get_reels.set(bool(d.get("hashtag_get_reels", True)))
+        self.use_keyword_search.set(bool(d.get("use_keyword_search", False)))
         self.min_followers.set(str(flt.get("min_followers", "")))
         self.max_followers.set(str(flt.get("max_followers", "")))
         self.seed_depth.set(str(d.get("seed_expansion_depth", 1)))
@@ -711,6 +764,12 @@ class App(tk.Tk):
         gender_cfg = t.get("gender_filter", {}) or {}
         gender_target = str(gender_cfg.get("target", "all") or "all").lower()
         self.gender_target_display.set({"female": "여성 중심", "male": "남성 중심"}.get(gender_target, "전체"))
+        self.creator_gate_enabled.set(bool(gate.get("enabled", True)))
+        self.min_visual_reference.set(str(gate.get("min_visual_reference", 0.89)))
+        self.min_visual_median.set(str(gate.get("min_visual_median", 0.82)))
+        self.min_topic_similarity.set(str(gate.get("min_topic_similarity", 0.50)))
+        self.min_target_fit.set(str(gate.get("min_target_fit", 0.52)))
+        self.negative_margin_reject.set(str(gate.get("negative_margin_reject", -0.02)))
 
         self.text_enabled.set(bool(txt.get("enabled", True)))
         self.text_model.set(txt.get("model_name", "intfloat/multilingual-e5-small"))
@@ -724,6 +783,7 @@ class App(tk.Tk):
         rank_weights = sim.get("weights", {}) or {}
         self.reference_top_k.set(str(ref.get("top_k_references", 2)))
         self._set_text(self.negative_references, join_list(ref.get("negative_usernames", [])))
+        self.rank_visual_weight.set(str(rank_weights.get("visual", 0.60)))
         self.rank_topic_weight.set(str(rank_weights.get("topic", 0.25)))
         self.rank_caption_weight.set(str(rank_weights.get("caption", 0.00)))
         self.rank_hashtag_weight.set(str(rank_weights.get("hashtag", 0.10)))
@@ -733,6 +793,10 @@ class App(tk.Tk):
             else str(sim.get("min_combined_similarity"))
         )
 
+        self.visual_enabled.set(bool(v.get("enabled", True)))
+        self.visual_model.set(v.get("model_name", "google/siglip2-base-patch16-224"))
+        self.images_per_account.set(str(v.get("images_per_account", 6)))
+        self.visual_batch_size.set(str(v.get("batch_size", 8)))
         self.accounts_to_analyze.set(str(p.get("accounts_to_analyze", 30)))
 
         self.performance_enabled.set(bool(p.get("enabled", True)))
@@ -756,24 +820,23 @@ class App(tk.Tk):
         c.setdefault("text_similarity", {})
         c.setdefault("similarity_ranking", {})
         c.setdefault("reference_matching", {})
+        c.setdefault("visual", {})
         c.setdefault("performance", {})
         c.setdefault("commercial_filter", {})
+        c.setdefault("creator_target_gate", {})
 
         c["campaign"]["name"] = self.campaign_name.get().strip()
         c["campaign"]["product"] = self.product.get().strip()
 
         d = c["discovery"]
         d["seed_usernames"] = split_list(self.seed_usernames.get("1.0", "end"))
-        d["queries"] = split_list(self.search_queries.get("1.0", "end"))
-        d["use_keyword_search"] = bool(self.use_keyword_search.get())
         d["use_hashtag_search"] = bool(self.use_hashtag_search.get())
         d["hashtags"] = [x.lstrip("#") for x in split_list(self.hashtags.get("1.0", "end"))]
-        d["hashtag_actor_id"] = "apify/instagram-hashtag-scraper"
-        d["hashtag_initial_posts"] = int(self.hashtag_initial_posts.get())
-        d["hashtag_target_valid_candidates"] = int(self.hashtag_target_valid.get())
-        d["hashtag_max_posts"] = int(self.hashtag_max_posts.get())
-        d["hashtag_expand_search"] = bool(self.hashtag_expand_search.get())
-        d["hashtag_allow_unknown_followers"] = False
+        d["hashtag_ad_signal_tags"] = [x.lstrip("#") for x in split_list(self.hashtag_ad_tags.get("1.0", "end"))]
+        d["hashtag_results_limit"] = int(self.hashtag_results_limit.get())
+        d["hashtag_get_posts"] = bool(self.hashtag_get_posts.get())
+        d["hashtag_get_reels"] = bool(self.hashtag_get_reels.get())
+        d["use_keyword_search"] = False
         d["seed_expansion_depth"] = int(self.seed_depth.get())
         d["max_related_per_profile"] = int(self.max_related.get())
         d["max_seed_candidates"] = int(self.max_seed_candidates.get())
@@ -799,6 +862,14 @@ class App(tk.Tk):
         gender_cfg.setdefault("reject_threshold", 3.0)
         gender_cfg.setdefault("opposite_margin", 2.0)
 
+        gate = c["creator_target_gate"]
+        gate["enabled"] = bool(self.creator_gate_enabled.get())
+        gate["min_visual_reference"] = float(self.min_visual_reference.get())
+        gate["min_visual_median"] = float(self.min_visual_median.get())
+        gate["min_topic_similarity"] = float(self.min_topic_similarity.get())
+        gate["min_target_fit"] = float(self.min_target_fit.get())
+        gate["negative_margin_reject"] = float(self.negative_margin_reject.get())
+        gate.setdefault("reject_low_visual_pair", True)
 
         txt = c["text_similarity"]
         txt["enabled"] = bool(self.text_enabled.get())
@@ -819,6 +890,7 @@ class App(tk.Tk):
 
         sim = c["similarity_ranking"]
         sim["weights"] = {
+            "visual": float(self.rank_visual_weight.get()),
             "topic": float(self.rank_topic_weight.get()),
             "hashtag": float(self.rank_hashtag_weight.get()),
             "graph": float(self.rank_graph_weight.get()),
@@ -826,6 +898,11 @@ class App(tk.Tk):
         }
         sim["min_combined_similarity"] = parse_optional_float(self.min_combined_similarity.get())
 
+        v = c["visual"]
+        v["enabled"] = bool(self.visual_enabled.get())
+        v["model_name"] = self.visual_model.get().strip()
+        v["images_per_account"] = int(self.images_per_account.get())
+        v["batch_size"] = int(self.visual_batch_size.get())
 
         p = c["performance"]
         p["enabled"] = bool(self.performance_enabled.get())
@@ -843,8 +920,10 @@ class App(tk.Tk):
         cf["reject_no_reel_data"] = bool(self.reject_no_reel_data.get())
 
         # Basic validation
-        if not d["seed_usernames"]:
-            raise ValueError("레퍼런스 계정을 최소 1개 입력하세요.")
+        if not d["seed_usernames"] and not d.get("hashtags"):
+            raise ValueError("레퍼런스 계정 또는 해시태그를 최소 1개 입력하세요.")
+        if d.get("use_hashtag_search") and d.get("hashtag_results_limit", 0) < 25:
+            raise ValueError("현재 Hashtag Actor는 해시태그당 최소 25개 결과를 요청해야 합니다.")
         if flt["min_followers"] < 0 or flt["max_followers"] < flt["min_followers"]:
             raise ValueError("팔로워 범위를 확인하세요.")
         if txt["recent_posts"] < 1:
@@ -853,6 +932,9 @@ class App(tk.Tk):
             raise ValueError("Caption/Hashtag 가중치를 확인하세요.")
         if ref["top_k_references"] < 1:
             raise ValueError("Reference Top K는 1 이상이어야 합니다.")
+        for name in ("min_visual_reference", "min_visual_median", "min_topic_similarity", "min_target_fit"):
+            if not 0 <= float(gate[name]) <= 1:
+                raise ValueError(f"{name} 값은 0~1 사이여야 합니다.")
         rank_weights = sim["weights"]
         if any(v < 0 for v in rank_weights.values()) or sum(rank_weights.values()) <= 0:
             raise ValueError("통합 랭킹 가중치를 확인하세요.")
