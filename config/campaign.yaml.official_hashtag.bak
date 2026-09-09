@@ -1,49 +1,44 @@
 campaign:
-  name: influencer_discovery_poc_v09_gui
-  product: 화장품
+  name: influencer_discovery_poc_v082_nonvisual_hashtag
+  product: SOL 트래블
 discovery:
   use_keyword_search: false
   google_actor_id: apify/google-search-scraper
   max_pages_per_query: 1
   keyword_result_limit: 50
   queries:
-  - 자기관리 직장인 여성 인플루언서
-  - 운동 자기관리 여성 인플루언서
-  - 라이프스타일 여성 인플루언서
+  - 여행
+  - 해외여행
+  - 유럽여행
   seed_usernames:
-  - go_manan20
-  - _mingdc
+  - tulney_
+  - heeah_travel
   seed_expansion_depth: 2
   max_related_per_profile: 10
   max_seed_candidates: 30
   use_related_fallback: true
   related_fallback_actor_id: instagram-scraper/instagram-related-profiles
   use_hashtag_search: true
-  hashtag_actor_id: publicsignallabs/instagram-hashtag-scraper
+  hashtag_actor_id: instaprism/instagram-hashtag-posts
+  hashtag_initial_posts: 100
+  hashtag_expand_search: false
+  hashtag_max_posts: 300
+  hashtag_target_valid_candidates: 10
+  hashtag_allow_unknown_followers: false
   hashtags:
-  - 올영세일
-  - 올리브영추천
-  - 뷰티추천
-  hashtag_results_limit: 50
-  hashtag_get_posts: true
-  hashtag_get_reels: true
-  hashtag_ad_signal_tags:
-  - 광고
-  - 협찬
-  - 제품제공
-  - 유료광고
-  profile_actor_id: dami_studio/instagram-profile-scraper
-  profile_include_latest_posts: true
+  - 여행
+  - 해외여행
+  - 유럽여행
 filters:
   min_followers: 30000
-  max_followers: 500000
+  max_followers: 1000000
   allow_unknown_followers: false
   include_seed_accounts: false
 targeting:
   include_keywords:
-  - 자기관리
-  - 라이프스타일
-  - 피부관리
+  - 여행
+  - 해외여행
+  - 유럽여행
   hard_exclude_keywords: []
   soft_exclude_keywords: []
   soft_exclude_penalty: 0.1
@@ -101,20 +96,12 @@ analysis:
     - 키즈
     - 엄마
     - 아기
-visual:
-  enabled: true
-  model_name: google/siglip2-base-patch16-224
-  images_per_account: 6
-  batch_size: 8
-  request_timeout_seconds: 15
-  reference_score_weight: 0.7
-  consistency_weight: 0.3
 performance:
   enabled: true
   accounts_to_analyze: 10
   ad_reels_target: 5
-  max_reels_to_scan: 30
-  only_posts_newer_than: 12 months
+  max_reels_to_scan: 10
+  only_posts_newer_than: 6 months
   skip_pinned_posts: true
   include_shares_count: false
 commercial_filter:
@@ -129,15 +116,15 @@ scoring:
   - office
   - lifestyle
   weights:
-    visual_similarity: 0.3
-    content_similarity: 0.2
+    ranking_similarity: 0.3
+    content_similarity: 0.15
     category_fit: 0.1
     ad_performance: 0.2
-    engagement: 0.15
+    engagement: 0.2
     follower_fit: 0.05
 output:
   sqlite_path: data/influencers.db
-  excel_path: output/candidates_v09.xlsx
+  excel_path: output/candidates_v083.xlsx
 text_similarity:
   enabled: true
   model_name: intfloat/multilingual-e5-small
@@ -170,20 +157,12 @@ text_similarity:
     entertainment: 방송 예능 연예인 출연자 셀럽 엔터테인먼트 콘텐츠
 similarity_ranking:
   weights:
-    visual: 0.6
-    topic: 0.25
-    hashtag: 0.1
-    graph: 0.05
-    caption: 0.0
+    topic: 0.55
+    hashtag: 0.2
+    graph: 0.15
+    caption: 0.1
+  min_ranking_score: null
   min_combined_similarity: null
 reference_matching:
   top_k_references: 2
   negative_usernames: []
-creator_target_gate:
-  enabled: true
-  min_visual_reference: 0.89
-  min_visual_median: 0.82
-  min_topic_similarity: 0.5
-  min_target_fit: 0.52
-  negative_margin_reject: -0.02
-  reject_low_visual_pair: true

@@ -1,3 +1,19 @@
+# Influencer Discovery PoC v0.9
+
+MVP 변경사항은 `README_V09.md`를 확인하세요.
+
+# Influencer Discovery PoC v0.8.1
+
+Discovery 안정화 변경사항은 `README_V081.md`를 확인하세요.
+
+# Influencer Discovery PoC v0.8
+
+최신 변경사항은 `README_V08.md`를 확인하세요.
+
+# Influencer Discovery PoC v0.7
+
+최신 변경사항은 `README_V07.md`를 확인하세요.
+
 # v0.6 GUI + Content Similarity
 
 이번 버전은 기존 SigLIP Visual Similarity에 Caption/Hashtag Content Similarity를 추가합니다. 자세한 내용은 `README_V06.md`를 참고하세요.

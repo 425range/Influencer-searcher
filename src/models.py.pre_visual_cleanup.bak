@@ -9,21 +9,6 @@ class Candidate:
     source: str = ""
     source_seed: str = ""
     discovery_depth: int = 0
-    discovery_sources: List[str] = field(default_factory=list)
-
-    # Hashtag discovery evidence
-    source_hashtags: List[str] = field(default_factory=list)
-    hashtag_discovery_posts: int = 0
-    hashtag_ad_posts: int = 0
-    hashtag_ad_tags: List[str] = field(default_factory=list)
-    hashtag_ad_ratio: float = 0.0
-    hashtag_latest_timestamp: str = ""
-
-    # MVP: keep candidates and expose filter/gate signals instead of rejecting
-    follower_in_range: Optional[bool] = None
-    targeting_flag: str = ""
-    category_flag: str = ""
-    commercial_flag: str = ""
 
     # v0.7 graph/reference-set metadata
     reference_hits: List[str] = field(default_factory=list)

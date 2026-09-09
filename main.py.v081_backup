@@ -8,7 +8,6 @@ from dotenv import load_dotenv
 from src.config_loader import load_config
 from src.discovery.seed_related import discover_from_seeds
 from src.discovery.apify_google import discover_by_keywords
-from src.discovery.apify_hashtag import discover_by_hashtags
 from src.collectors.instagram_profile import scrape_profiles
 from src.collectors.profile_parser import enrich_candidate, posts_from_profile
 from src.collectors.instagram_reels import scrape_reels, reels_from_items
@@ -27,39 +26,42 @@ from src.exporters.excel_exporter import export
 
 def merge_candidates(*groups):
     merged = {}
-    priority = {"seed_related": 3, "seed_related_fallback": 3, "hashtag": 2, "keyword": 1}
+    priority = {"seed_related": 2, "keyword": 1}
     for group in groups:
         for c in group:
             key = c.username.lower()
-            if not getattr(c, "discovery_sources", None):
-                c.discovery_sources = [c.source] if c.source else []
             existing = merged.get(key)
             if existing is None:
                 merged[key] = c
-                continue
-
-            existing.discovery_sources = sorted(set(existing.discovery_sources) | set(c.discovery_sources))
-            existing.source_hashtags = sorted(set(getattr(existing, "source_hashtags", [])) | set(getattr(c, "source_hashtags", [])))
-            existing.hashtag_discovery_posts += int(getattr(c, "hashtag_discovery_posts", 0) or 0)
-            existing.hashtag_ad_posts += int(getattr(c, "hashtag_ad_posts", 0) or 0)
-            existing.hashtag_ad_tags = sorted(set(getattr(existing, "hashtag_ad_tags", [])) | set(getattr(c, "hashtag_ad_tags", [])))
-            if existing.hashtag_discovery_posts:
-                existing.hashtag_ad_ratio = existing.hashtag_ad_posts / existing.hashtag_discovery_posts
-            existing.hashtag_latest_timestamp = max(
-                getattr(existing, "hashtag_latest_timestamp", "") or "",
-                getattr(c, "hashtag_latest_timestamp", "") or "",
-            )
-
-            existing.reference_hits = sorted(set(existing.reference_hits) | set(c.reference_hits))
-            existing.reference_overlap_count = max(existing.reference_overlap_count, c.reference_overlap_count, len(existing.reference_hits))
-            existing.reference_overlap_ratio = max(existing.reference_overlap_ratio or 0.0, c.reference_overlap_ratio or 0.0)
-            if c.graph_similarity is not None:
-                existing.graph_similarity = max(existing.graph_similarity or 0.0, c.graph_similarity)
-            if priority.get(c.source, 0) > priority.get(existing.source, 0):
-                existing.source = c.source
-                existing.source_seed = c.source_seed or existing.source_seed
-                existing.discovery_depth = c.discovery_depth or existing.discovery_depth
+            else:
+                # Preserve all Reference-set graph hits even when the same
+                # account is also discovered by keyword search.
+                existing.reference_hits = sorted(
+                    set(getattr(existing, "reference_hits", []) or [])
+                    | set(getattr(c, "reference_hits", []) or [])
+                )
+                existing.reference_overlap_count = max(
+                    getattr(existing, "reference_overlap_count", 0),
+                    getattr(c, "reference_overlap_count", 0),
+                    len(existing.reference_hits),
+                )
+                existing.reference_overlap_ratio = max(
+                    getattr(existing, "reference_overlap_ratio", 0.0) or 0.0,
+                    getattr(c, "reference_overlap_ratio", 0.0) or 0.0,
+                )
+                if getattr(c, "graph_similarity", None) is not None:
+                    existing.graph_similarity = max(
+                        getattr(existing, "graph_similarity", 0.0) or 0.0,
+                        c.graph_similarity,
+                    )
+                if priority.get(c.source, 0) > priority.get(existing.source, 0):
+                    c.reference_hits = existing.reference_hits
+                    c.reference_overlap_count = existing.reference_overlap_count
+                    c.reference_overlap_ratio = existing.reference_overlap_ratio
+                    c.graph_similarity = existing.graph_similarity
+                    merged[key] = c
     return list(merged.values())
+
 
 def reject_row(candidate, reason, stage):
     return {
@@ -81,13 +83,6 @@ def candidate_row(c, metrics, performance_analyzed, include_hits="", soft_hits="
         "username": c.username,
         "profile_url": c.profile_url,
         "source": c.source,
-        "discovery_sources": ", ".join(c.discovery_sources),
-        "source_hashtags": ", ".join(c.source_hashtags),
-        "hashtag_discovery_posts": c.hashtag_discovery_posts,
-        "hashtag_ad_posts": c.hashtag_ad_posts,
-        "hashtag_ad_ratio": c.hashtag_ad_ratio,
-        "hashtag_ad_tags": ", ".join(c.hashtag_ad_tags),
-        "hashtag_latest_timestamp": c.hashtag_latest_timestamp,
         "source_seed": c.source_seed,
         "discovery_depth": c.discovery_depth,
         "reference_hits": ", ".join(c.reference_hits),
@@ -96,10 +91,6 @@ def candidate_row(c, metrics, performance_analyzed, include_hits="", soft_hits="
         "graph_similarity": c.graph_similarity,
         "display_name": c.display_name,
         "followers": c.followers,
-        "follower_in_range": c.follower_in_range,
-        "targeting_flag": c.targeting_flag,
-        "category_flag": c.category_flag,
-        "commercial_flag": c.commercial_flag,
         "bio": c.bio,
         "include_keyword_hits": include_hits,
         "soft_exclude_hits": soft_hits,
@@ -193,8 +184,6 @@ def main(config_path):
 
     client = ApifyClient(token)
     dcfg = cfg["discovery"]
-    profile_actor_id = dcfg.get("profile_actor_id", "dami_studio/instagram-profile-scraper")
-    profile_include_latest_posts = bool(dcfg.get("profile_include_latest_posts", True))
     filters = cfg["filters"]
     targeting = cfg.get("targeting", {})
     seeds = [x.strip().lstrip("@") for x in dcfg.get("seed_usernames", [])]
@@ -224,22 +213,9 @@ def main(config_path):
             "related_fallback_actor_id",
             "instagram-scraper/instagram-related-profiles",
         ),
-        profile_actor_id=profile_actor_id,
     )
-    hashtag_candidates = []
-    if dcfg.get("use_hashtag_search", True):
-        hashtag_candidates = discover_by_hashtags(
-            client=client,
-            hashtags=dcfg.get("hashtags", []),
-            actor_id=dcfg.get("hashtag_actor_id", "publicsignallabs/instagram-hashtag-scraper"),
-            results_limit_per_hashtag=int(dcfg.get("hashtag_results_limit", 100)),
-            get_posts=bool(dcfg.get("hashtag_get_posts", True)),
-            get_reels=bool(dcfg.get("hashtag_get_reels", True)),
-            ad_signal_tags=dcfg.get("hashtag_ad_signal_tags", cfg["analysis"].get("ad_keywords", [])),
-        )
-
     keyword_candidates = []
-    if dcfg.get("use_keyword_search", False):
+    if dcfg.get("use_keyword_search", True):
         keyword_candidates = discover_by_keywords(
             client=client,
             queries=dcfg.get("queries", []),
@@ -247,12 +223,10 @@ def main(config_path):
             max_pages_per_query=dcfg.get("max_pages_per_query", 1),
             result_limit=dcfg.get("keyword_result_limit", 50),
         )
-
-    candidates = merge_candidates(seed_candidates, hashtag_candidates, keyword_candidates)
+    candidates = merge_candidates(seed_candidates, keyword_candidates)
     print(
         f"  discovery summary: related={len(seed_candidates)}, "
-        f"hashtag={len(hashtag_candidates)}, google={len(keyword_candidates)}, "
-        f"merged_unique={len(candidates)}"
+        f"google={len(keyword_candidates)}, merged_unique={len(candidates)}"
     )
 
     print("[2/12] Profile enrichment")
@@ -272,11 +246,7 @@ def main(config_path):
             f"  profile enrichment: cached={len(item_by_username)}, "
             f"scraping_missing={len(missing_profiles)}"
         )
-        profile_items = scrape_profiles(
-            client, missing_profiles,
-            actor_id=profile_actor_id,
-            include_latest_posts=profile_include_latest_posts,
-        )
+        profile_items = scrape_profiles(client, missing_profiles)
         for item in profile_items:
             username = str(item.get("username", "")).strip()
             if username:
@@ -295,13 +265,13 @@ def main(config_path):
 
     profile_posts = []
     enriched = []
-    unavailable_candidates = []
     for c in candidates:
         item = item_by_username.get(c.username.lower())
         if not item:
-            c.status = "profile_unavailable"
-            c.targeting_flag = "profile_not_found"
-            unavailable_candidates.append(c)
+            if filters.get("allow_unknown_followers", False):
+                enriched.append(c)
+            else:
+                rejected_rows.append(reject_row(c, "profile_not_found", "profile"))
             continue
         c = enrich_candidate(c, item)
         user_posts = posts_from_profile(item)
@@ -342,13 +312,16 @@ def main(config_path):
         if c.username.lower() in seed_set and not filters.get("include_seed_accounts", False):
             continue
         if c.username.lower() in negative_ref_set:
-            # Negative references are controls, not discovery candidates.
+            rejected_rows.append(reject_row(c, "listed_as_negative_reference", "reference_filter"))
             continue
 
         if c.followers is None:
-            c.follower_in_range = None
-        else:
-            c.follower_in_range = bool(filters["min_followers"] <= c.followers <= filters["max_followers"])
+            if not filters.get("allow_unknown_followers", False):
+                rejected_rows.append(reject_row(c, "unknown_followers", "hard_filter"))
+                continue
+        elif not (filters["min_followers"] <= c.followers <= filters["max_followers"]):
+            rejected_rows.append(reject_row(c, "followers_out_of_range", "hard_filter"))
+            continue
 
         user_posts = profile_posts_by_user.get(c.username.lower(), [])
         text = build_text(c.bio, [p.caption for p in user_posts])
@@ -368,12 +341,16 @@ def main(config_path):
         c.gender_target_match = gender_meta["gender_target_match"]
         c.gender_evidence = gender_meta["gender_evidence"]
 
-        flags = []
         if t["hard_reject"]:
-            flags.append("hard_exclude:" + ",".join(t["hard_exclude_hits"]))
+            rejected_rows.append(reject_row(c, "hard_exclude:" + ",".join(t["hard_exclude_hits"]), "targeting"))
+            continue
+
         if gender_meta["gender_reject"]:
-            flags.append("gender_target_mismatch:" + gender_meta["gender_signal"])
-        c.targeting_flag = " | ".join(flags)
+            reason = "gender_target_mismatch:" + gender_meta["gender_signal"]
+            if gender_meta["gender_evidence"]:
+                reason += ":" + gender_meta["gender_evidence"]
+            rejected_rows.append(reject_row(c, reason, "gender_filter"))
+            continue
 
         c.category_scores = category_scores(text, cfg["analysis"]["category_keywords"])
 
@@ -384,7 +361,12 @@ def main(config_path):
             if c.category_scores.get(name, 0.0) >= exclude_threshold
         ]
         if category_rejects:
-            c.category_flag = "hard_exclude_category:" + ",".join(category_rejects)
+            rejected_rows.append(reject_row(
+                c,
+                "hard_exclude_category:" + ",".join(category_rejects),
+                "targeting",
+            ))
+            continue
 
         c.seed_similarity = seed_similarity(c, seed_texts)
         c.pre_score = pre_score(
@@ -431,12 +413,23 @@ def main(config_path):
 
     print("[6/12] Creator Target Gate + combined ranking")
     gate_cfg = cfg.get("creator_target_gate", {})
+    gate_kept = []
     for c in candidates:
         meta = evaluate_creator_target(c, gate_cfg)
         c.creator_target_fit = meta["creator_target_fit"]
         c.creator_target_gate = meta["creator_target_gate"]
         c.creator_target_reason = meta["creator_target_reason"]
-    print(f"  creator target scored (no reject): {len(candidates)}")
+        if meta["creator_target_reject"]:
+            rejected_rows.append(reject_row(
+                c,
+                meta["creator_target_reason"] or "creator_target_mismatch",
+                "creator_target_gate",
+            ))
+            continue
+        gate_kept.append(c)
+
+    candidates = gate_kept
+    print(f"  after creator target gate: {len(candidates)}")
 
     if candidates:
         candidates = rank_candidates_combined(candidates, cfg.get("similarity_ranking", {}))
@@ -447,9 +440,20 @@ def main(config_path):
     min_similarity = qcfg.get("min_combined_similarity")
     if min_similarity is not None and str(min_similarity).strip() != "":
         min_similarity = float(min_similarity)
+        quality_kept = []
         for c in candidates:
-            c.quality_pass = bool(c.combined_similarity is not None and c.combined_similarity >= min_similarity)
-        print(f"  quality threshold >= {min_similarity}: flag only, no reject")
+            passed = c.combined_similarity is not None and c.combined_similarity >= min_similarity
+            c.quality_pass = passed
+            if passed:
+                quality_kept.append(c)
+            else:
+                rejected_rows.append(reject_row(
+                    c,
+                    f"combined_similarity<{min_similarity}",
+                    "quality_threshold",
+                ))
+        candidates = quality_kept
+        print(f"  quality threshold >= {min_similarity}: {len(candidates)} kept")
     else:
         for c in candidates:
             c.quality_pass = True
@@ -492,7 +496,9 @@ def main(config_path):
         metrics = reel_metrics.get(c.username.lower(), {})
         if analyzed:
             reason = commercial_reject_reason(metrics, commercial_cfg)
-            c.commercial_flag = reason or ""
+            if reason:
+                rejected_rows.append(reject_row(c, reason, "commercial_filter"))
+                continue
             t = target_meta.get(c.username.lower(), {})
             c.score = final_score(
                 c,
@@ -509,7 +515,7 @@ def main(config_path):
     not_analyzed = [c for c in final_candidates if c.username.lower() not in analyzed_names]
     analyzed.sort(key=lambda c: c.score, reverse=True)
     not_analyzed.sort(key=lambda c: c.combined_rank or 999999)
-    final_candidates = analyzed + not_analyzed + unavailable_candidates
+    final_candidates = analyzed + not_analyzed
 
     print("[10/12] SQLite")
     store = SQLiteStore(cfg["output"]["sqlite_path"])
@@ -535,12 +541,13 @@ def main(config_path):
     export(
         candidate_rows,
         reel_rows(reels, selected_ad_by_user),
+        rejected_rows,
         cfg["output"]["excel_path"],
     )
 
     print("\nDONE")
-    print(f"Candidates exported: {len(final_candidates)}")
-    print("Rejected: disabled in MVP v0.9 (signals are columns)")
+    print(f"Candidates kept: {len(final_candidates)}")
+    print(f"Rejected: {len(rejected_rows)}")
     print(f"Reels scraped: {len(reels)}")
     print(f"Excel: {cfg['output']['excel_path']}")
 
