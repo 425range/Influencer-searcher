@@ -60,7 +60,7 @@ class ScrollText(tk.Text):
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Influencer Discovery PoC v0.9")
+        self.title("Influencer Discovery PoC v0.9.1")
         self.geometry("1120x900")
         self.minsize(980, 760)
 
@@ -512,10 +512,9 @@ class App(tk.Tk):
         self.max_related = tk.StringVar()
         self.max_seed_candidates = tk.StringVar()
         self.use_keyword_search = tk.BooleanVar(value=False)
+        self.use_related_search = tk.BooleanVar(value=True)
         self.use_hashtag_search = tk.BooleanVar(value=True)
         self.hashtag_results_limit = tk.StringVar()
-        self.hashtag_get_posts = tk.BooleanVar(value=True)
-        self.hashtag_get_reels = tk.BooleanVar(value=True)
 
         r = 0
         self._entry(f, r, "캠페인명", self.campaign_name); r += 1
@@ -525,11 +524,10 @@ class App(tk.Tk):
         self.hashtag_ad_tags = self._text_area(f, r, "광고 신호 해시태그", 4, "예: 광고, 협찬, 제품제공, 유료광고. 같은 게시물에 함께 있으면 기록"); r += 1
 
         ttk.Checkbutton(f, text="해시태그 검색 사용", variable=self.use_hashtag_search, style="TCheckbutton").grid(row=r, column=1, sticky="w", pady=5); r += 1
-        self._entry(f, r, "해시태그당 게시물 수", self.hashtag_results_limit, help_text="MVP 권장 50~100"); r += 1
-        ttk.Checkbutton(f, text="일반 게시물 포함", variable=self.hashtag_get_posts).grid(row=r, column=1, sticky="w", pady=4); r += 1
-        ttk.Checkbutton(f, text="Reels 포함", variable=self.hashtag_get_reels).grid(row=r, column=1, sticky="w", pady=4); r += 1
+        self._entry(f, r, "해시태그당 결과 수", self.hashtag_results_limit, help_text="Dami Hashtag Actor. Posts/Reels를 함께 반환. 테스트 20~50 권장"); r += 1
         self._entry(f, r, "최소 팔로워", self.min_followers, help_text="예: 30000"); r += 1
         self._entry(f, r, "최대 팔로워", self.max_followers, help_text="예: 500000"); r += 1
+        ttk.Checkbutton(f, text="관련 추천 계정 검색 사용", variable=self.use_related_search, style="TCheckbutton").grid(row=r, column=1, sticky="w", pady=5); r += 1
         self._entry(f, r, "추천 확장 Depth", self.seed_depth, help_text="1=직접 추천, 2=추천의 추천"); r += 1
         self._entry(f, r, "계정당 Related 최대", self.max_related); r += 1
         self._entry(f, r, "Seed 후보 최대", self.max_seed_candidates); r += 1
@@ -744,10 +742,9 @@ class App(tk.Tk):
         self._set_text(self.seed_usernames, join_list(d.get("seed_usernames", [])))
         self._set_text(self.hashtags, join_list(d.get("hashtags", [])))
         self._set_text(self.hashtag_ad_tags, join_list(d.get("hashtag_ad_signal_tags", ["광고", "협찬", "제품제공", "유료광고"])))
+        self.use_related_search.set(bool(d.get("use_related_search", True)))
         self.use_hashtag_search.set(bool(d.get("use_hashtag_search", True)))
         self.hashtag_results_limit.set(str(d.get("hashtag_results_limit", 100)))
-        self.hashtag_get_posts.set(bool(d.get("hashtag_get_posts", True)))
-        self.hashtag_get_reels.set(bool(d.get("hashtag_get_reels", True)))
         self.use_keyword_search.set(bool(d.get("use_keyword_search", False)))
         self.min_followers.set(str(flt.get("min_followers", "")))
         self.max_followers.set(str(flt.get("max_followers", "")))
@@ -830,12 +827,14 @@ class App(tk.Tk):
 
         d = c["discovery"]
         d["seed_usernames"] = split_list(self.seed_usernames.get("1.0", "end"))
+        d["use_related_search"] = bool(self.use_related_search.get())
         d["use_hashtag_search"] = bool(self.use_hashtag_search.get())
         d["hashtags"] = [x.lstrip("#") for x in split_list(self.hashtags.get("1.0", "end"))]
         d["hashtag_ad_signal_tags"] = [x.lstrip("#") for x in split_list(self.hashtag_ad_tags.get("1.0", "end"))]
         d["hashtag_results_limit"] = int(self.hashtag_results_limit.get())
-        d["hashtag_get_posts"] = bool(self.hashtag_get_posts.get())
-        d["hashtag_get_reels"] = bool(self.hashtag_get_reels.get())
+        d["hashtag_actor_id"] = "dami_studio/instagram-hashtag-scraper"
+        d.pop("hashtag_get_posts", None)
+        d.pop("hashtag_get_reels", None)
         d["use_keyword_search"] = False
         d["seed_expansion_depth"] = int(self.seed_depth.get())
         d["max_related_per_profile"] = int(self.max_related.get())
@@ -920,10 +919,16 @@ class App(tk.Tk):
         cf["reject_no_reel_data"] = bool(self.reject_no_reel_data.get())
 
         # Basic validation
-        if not d["seed_usernames"] and not d.get("hashtags"):
-            raise ValueError("레퍼런스 계정 또는 해시태그를 최소 1개 입력하세요.")
-        if d.get("use_hashtag_search") and d.get("hashtag_results_limit", 0) < 25:
-            raise ValueError("현재 Hashtag Actor는 해시태그당 최소 25개 결과를 요청해야 합니다.")
+        related_ready = bool(d.get("use_related_search")) and bool(d["seed_usernames"])
+        hashtag_ready = bool(d.get("use_hashtag_search")) and bool(d.get("hashtags"))
+        if not related_ready and not hashtag_ready:
+            raise ValueError("관련 추천 검색 또는 해시태그 검색 중 최소 1개를 켜고 입력값을 넣으세요.")
+        if d.get("use_related_search") and not d["seed_usernames"]:
+            raise ValueError("관련 추천 계정 검색을 사용하려면 레퍼런스 계정을 입력하세요.")
+        if d.get("use_hashtag_search") and not d.get("hashtags"):
+            raise ValueError("해시태그 검색을 사용하려면 해시태그를 입력하세요.")
+        if d.get("use_hashtag_search") and d.get("hashtag_results_limit", 0) < 1:
+            raise ValueError("해시태그당 결과 수는 1 이상이어야 합니다.")
         if flt["min_followers"] < 0 or flt["max_followers"] < flt["min_followers"]:
             raise ValueError("팔로워 범위를 확인하세요.")
         if txt["recent_posts"] < 1:

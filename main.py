@@ -212,29 +212,32 @@ def main(config_path):
     # Cache Reference profile responses from discovery so the enrichment stage
     # does not pay to scrape the same References again.
     discovery_profile_cache = {}
-    seed_candidates = discover_from_seeds(
-        client=client,
-        seed_usernames=seeds,
-        depth=dcfg.get("seed_expansion_depth", 1),
-        max_related_per_profile=dcfg.get("max_related_per_profile", 20),
-        max_candidates=dcfg.get("max_seed_candidates", 100),
-        profile_cache=discovery_profile_cache,
-        use_related_fallback=dcfg.get("use_related_fallback", True),
-        related_fallback_actor_id=dcfg.get(
-            "related_fallback_actor_id",
-            "instagram-scraper/instagram-related-profiles",
-        ),
-        profile_actor_id=profile_actor_id,
-    )
+    seed_candidates = []
+    if dcfg.get("use_related_search", True):
+        print("  related discovery: ENABLED")
+        seed_candidates = discover_from_seeds(
+            client=client,
+            seed_usernames=seeds,
+            depth=dcfg.get("seed_expansion_depth", 1),
+            max_related_per_profile=dcfg.get("max_related_per_profile", 20),
+            max_candidates=dcfg.get("max_seed_candidates", 100),
+            profile_cache=discovery_profile_cache,
+            use_related_fallback=dcfg.get("use_related_fallback", True),
+            related_fallback_actor_id=dcfg.get(
+                "related_fallback_actor_id",
+                "instagram-scraper/instagram-related-profiles",
+            ),
+            profile_actor_id=profile_actor_id,
+        )
+    else:
+        print("  related discovery: DISABLED")
     hashtag_candidates = []
     if dcfg.get("use_hashtag_search", True):
         hashtag_candidates = discover_by_hashtags(
             client=client,
             hashtags=dcfg.get("hashtags", []),
-            actor_id=dcfg.get("hashtag_actor_id", "publicsignallabs/instagram-hashtag-scraper"),
+            actor_id=dcfg.get("hashtag_actor_id", "dami_studio/instagram-hashtag-scraper"),
             results_limit_per_hashtag=int(dcfg.get("hashtag_results_limit", 100)),
-            get_posts=bool(dcfg.get("hashtag_get_posts", True)),
-            get_reels=bool(dcfg.get("hashtag_get_reels", True)),
             ad_signal_tags=dcfg.get("hashtag_ad_signal_tags", cfg["analysis"].get("ad_keywords", [])),
         )
 

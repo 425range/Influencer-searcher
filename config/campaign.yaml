@@ -19,14 +19,12 @@ discovery:
   use_related_fallback: true
   related_fallback_actor_id: instagram-scraper/instagram-related-profiles
   use_hashtag_search: true
-  hashtag_actor_id: publicsignallabs/instagram-hashtag-scraper
+  hashtag_actor_id: dami_studio/instagram-hashtag-scraper
   hashtags:
   - 올영세일
   - 올리브영추천
   - 뷰티추천
   hashtag_results_limit: 50
-  hashtag_get_posts: true
-  hashtag_get_reels: true
   hashtag_ad_signal_tags:
   - 광고
   - 협찬
@@ -34,6 +32,7 @@ discovery:
   - 유료광고
   profile_actor_id: dami_studio/instagram-profile-scraper
   profile_include_latest_posts: true
+  use_related_search: false
 filters:
   min_followers: 30000
   max_followers: 500000
@@ -102,7 +101,7 @@ analysis:
     - 엄마
     - 아기
 visual:
-  enabled: true
+  enabled: false
   model_name: google/siglip2-base-patch16-224
   images_per_account: 6
   batch_size: 8
