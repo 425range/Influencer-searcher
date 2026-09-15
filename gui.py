@@ -52,7 +52,7 @@ class App(tk.Tk):
 
     def __init__(self):
         super().__init__()
-        self.title("Influencer Discovery v0.9.2")
+        self.title("Influencer Discovery v0.9.2.1")
         self.geometry("900x820")
         self.minsize(820, 720)
 
@@ -145,17 +145,75 @@ class App(tk.Tk):
         ).pack(side="left", padx=22, pady=18)
         tk.Label(
             header,
-            text="v0.9.2 · 간편 모드",
+            text="v0.9.2.1 · 간편 모드",
             bg=c["header"],
             fg="#BFDBFE",
             font=("Segoe UI", 10, "bold"),
         ).pack(side="left", pady=(25, 0))
 
-        outer = tk.Frame(self, bg=c["bg"])
-        outer.pack(fill="both", expand=True, padx=16, pady=14)
+        # Scrollable main area.
+        # The previous v0.9.2 packed all cards directly into the window, so on
+        # smaller displays the bottom controls/log were clipped with no way to
+        # reach them. Keep the header fixed and scroll the full content area.
+        body = tk.Frame(self, bg=c["bg"])
+        body.pack(fill="both", expand=True)
+
+        canvas = tk.Canvas(
+            body,
+            bg=c["bg"],
+            highlightthickness=0,
+            bd=0,
+        )
+        page_scroll = ttk.Scrollbar(body, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=page_scroll.set)
+
+        page_scroll.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+
+        outer = tk.Frame(canvas, bg=c["bg"])
+        window_id = canvas.create_window((0, 0), window=outer, anchor="nw")
+
+        def _update_scrollregion(_event=None):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def _fit_content_width(event):
+            # Make cards stretch with the available window width.
+            canvas.itemconfigure(window_id, width=event.width)
+
+        def _on_mousewheel(event):
+            # Windows/macOS Tk mouse wheel.
+            delta = event.delta
+            if delta:
+                canvas.yview_scroll(int(-1 * (delta / 120)), "units")
+            return "break"
+
+        def _on_linux_scroll_up(_event):
+            canvas.yview_scroll(-1, "units")
+            return "break"
+
+        def _on_linux_scroll_down(_event):
+            canvas.yview_scroll(1, "units")
+            return "break"
+
+        outer.bind("<Configure>", _update_scrollregion)
+        canvas.bind("<Configure>", _fit_content_width)
+
+        # Bind wheel while pointer is anywhere in the scrollable page.
+        for widget in (canvas, outer):
+            widget.bind("<MouseWheel>", _on_mousewheel)
+            widget.bind("<Button-4>", _on_linux_scroll_up)
+            widget.bind("<Button-5>", _on_linux_scroll_down)
+
+        # Apply wheel binding to child widgets as well, including Text boxes.
+        def _bind_wheel_recursive(widget):
+            widget.bind("<MouseWheel>", _on_mousewheel, add="+")
+            widget.bind("<Button-4>", _on_linux_scroll_up, add="+")
+            widget.bind("<Button-5>", _on_linux_scroll_down, add="+")
+            for child in widget.winfo_children():
+                _bind_wheel_recursive(child)
 
         info = tk.Frame(outer, bg=c["info"], bd=0)
-        info.pack(fill="x", pady=(0, 10))
+        info.pack(fill="x", padx=16, pady=(14, 10))
         tk.Label(
             info,
             text=(
@@ -170,7 +228,7 @@ class App(tk.Tk):
         ).pack(anchor="w")
 
         form = ttk.LabelFrame(outer, text="검색 조건", padding=16, style="Card.TLabelframe")
-        form.pack(fill="x")
+        form.pack(fill="x", padx=16)
         form.columnconfigure(1, weight=1)
 
         self.campaign_name = tk.StringVar()
@@ -209,7 +267,7 @@ class App(tk.Tk):
         self._compact_entry(row6, 2, "최대 팔로워", self.max_followers, "예: 500000")
 
         billing = ttk.LabelFrame(outer, text="자동 검색 방식", padding=12, style="Card.TLabelframe")
-        billing.pack(fill="x", pady=(10, 0))
+        billing.pack(fill="x", padx=16, pady=(10, 0))
         ttk.Label(
             billing,
             text=(
@@ -223,7 +281,7 @@ class App(tk.Tk):
         ).pack(anchor="w")
 
         actions = ttk.Frame(outer, padding=(0, 12, 0, 6))
-        actions.pack(fill="x")
+        actions.pack(fill="x", padx=16)
         self.run_button = ttk.Button(actions, text="▶  인플루언서 찾기", style="Primary.TButton", command=self.start_analysis)
         self.run_button.pack(side="left")
         ttk.Button(actions, text="결과 Excel 열기", style="Success.TButton", command=self.open_excel).pack(side="left", padx=(10, 6))
@@ -232,7 +290,7 @@ class App(tk.Tk):
         ttk.Label(actions, textvariable=self.status_var).pack(side="right")
 
         log_frame = ttk.LabelFrame(outer, text="진행 상황", padding=8, style="Card.TLabelframe")
-        log_frame.pack(fill="both", expand=True)
+        log_frame.pack(fill="both", expand=True, padx=16, pady=(0, 16))
         self.log = tk.Text(
             log_frame,
             height=12,
@@ -249,6 +307,10 @@ class App(tk.Tk):
         self.log.configure(yscrollcommand=scroll.set)
         self.log.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
+
+        # Finish wheel binding after all child widgets exist.
+        _bind_wheel_recursive(outer)
+        self._page_canvas = canvas
 
     def _entry(self, parent, row, label, var, hint=""):
         ttk.Label(parent, text=label, style="Card.TLabel").grid(row=row, column=0, sticky="w", pady=7, padx=(0, 12))
