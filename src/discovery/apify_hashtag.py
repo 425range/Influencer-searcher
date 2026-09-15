@@ -45,13 +45,21 @@ def discover_by_hashtags(
     actor_id: str = "dami_studio/instagram-hashtag-scraper",
     results_limit_per_hashtag: int = 100,
     ad_signal_tags: list[str] | None = None,
+    return_stats: bool = False,
 ):
     hashtags = list(dict.fromkeys(
         _clean_tag(x) for x in (hashtags or []) if _clean_tag(x)
     ))
     if not hashtags:
         print("  hashtag discovery: 0 hashtag")
-        return []
+        empty_stats = {
+            "dataset_rows": 0,
+            "usable_media_rows": 0,
+            "rows_with_owner": 0,
+            "ad_media_rows": 0,
+            "unique_creators": 0,
+        }
+        return ([], empty_stats) if return_stats else []
 
     ad_signal_set = {
         _clean_tag(x).lower()
@@ -164,6 +172,13 @@ def discover_by_hashtags(
         c.hashtag_latest_timestamp = a["latest_timestamp"]
         result.append(c)
 
+    stats = {
+        "dataset_rows": dataset_rows,
+        "usable_media_rows": usable_media_rows,
+        "rows_with_owner": rows_with_owner,
+        "ad_media_rows": ad_media_rows,
+        "unique_creators": len(result),
+    }
     print(
         "  hashtag discovery result: "
         f"dataset_rows={dataset_rows}, "
@@ -172,4 +187,4 @@ def discover_by_hashtags(
         f"ad_media_rows={ad_media_rows}, "
         f"unique_creators={len(result)}"
     )
-    return result
+    return (result, stats) if return_stats else result
