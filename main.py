@@ -1,5 +1,6 @@
 import argparse
 import os
+import math
 from collections import defaultdict
 
 from apify_client import ApifyClient
@@ -184,6 +185,165 @@ def reel_rows(reels, selected_ad_by_user):
     return rows
 
 
+
+def _profile_followers(item):
+    try:
+        value = item.get("followersCount") if isinstance(item, dict) else None
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _count_eligible(candidates, item_by_username, filters, seed_set=None):
+    seed_set = seed_set or set()
+    count = 0
+    for c in candidates:
+        if c.username.lower() in seed_set:
+            continue
+        item = item_by_username.get(c.username.lower())
+        followers = _profile_followers(item)
+        if followers is None:
+            continue
+        if filters["min_followers"] <= followers <= filters["max_followers"]:
+            count += 1
+    return count
+
+
+def _merge_hashtag_rounds(previous, current):
+    """Merge adaptive hashtag rounds without double-counting repeated posts.
+
+    A deeper Dami run can include rows already seen in the previous run. Since
+    the Actor has no offset parameter, keep the maximum evidence count for an
+    account rather than summing repeated rows across runs.
+    """
+    merged = {c.username.lower(): c for c in (previous or [])}
+    for c in current or []:
+        key = c.username.lower()
+        old = merged.get(key)
+        if old is None:
+            merged[key] = c
+            continue
+        old.discovery_sources = sorted(set(old.discovery_sources) | set(c.discovery_sources))
+        old.source_hashtags = sorted(set(old.source_hashtags) | set(c.source_hashtags))
+        old.hashtag_discovery_posts = max(old.hashtag_discovery_posts, c.hashtag_discovery_posts)
+        old.hashtag_ad_posts = max(old.hashtag_ad_posts, c.hashtag_ad_posts)
+        old.hashtag_ad_tags = sorted(set(old.hashtag_ad_tags) | set(c.hashtag_ad_tags))
+        old.hashtag_ad_ratio = max(old.hashtag_ad_ratio, c.hashtag_ad_ratio)
+        old.hashtag_latest_timestamp = max(old.hashtag_latest_timestamp or "", c.hashtag_latest_timestamp or "")
+    return list(merged.values())
+
+
+def _ensure_profile_cache(client, candidates, cache, actor_id, include_latest_posts, billing):
+    missing = [
+        c.username for c in candidates
+        if c.username.lower() not in cache
+    ]
+    if not missing:
+        return
+    items = scrape_profiles(
+        client,
+        missing,
+        actor_id=actor_id,
+        include_latest_posts=include_latest_posts,
+    )
+    charged_like_rows = 0
+    for item in items:
+        username = str(item.get("username", "")).strip()
+        if username:
+            cache[username.lower()] = item
+            charged_like_rows += 1
+    billing["profile_rows"] += charged_like_rows
+
+
+def adaptive_hashtag_discovery(
+    client,
+    hashtags,
+    actor_id,
+    ad_signal_tags,
+    profile_actor_id,
+    profile_include_latest_posts,
+    item_by_username,
+    seed_candidates,
+    seed_set,
+    filters,
+    target_candidates,
+    initial_limit=50,
+    growth_factor=2.0,
+    max_limit=500,
+    max_rounds=4,
+    hashtag_cost_per_result=0.0004,
+    profile_cost_per_result=0.0007,
+    billing=None,
+):
+    billing = billing if billing is not None else {"hashtag_rows": 0, "profile_rows": 0}
+    if not hashtags:
+        return [], billing
+
+    related_eligible = _count_eligible(seed_candidates, item_by_username, filters, seed_set)
+    if related_eligible >= target_candidates:
+        print(
+            f"  adaptive hashtag: skipped; follower-fit candidates already "
+            f"{related_eligible}/{target_candidates}"
+        )
+        return [], billing
+
+    cumulative = []
+    limit = max(1, int(initial_limit))
+    max_limit = max(limit, int(max_limit))
+    max_rounds = max(1, int(max_rounds))
+
+    print(
+        f"  adaptive hashtag: target={target_candidates}, "
+        f"related_follower_fit={related_eligible}, initial_limit={limit}, max_limit={max_limit}"
+    )
+
+    for round_idx in range(1, max_rounds + 1):
+        round_candidates, stats = discover_by_hashtags(
+            client=client,
+            hashtags=hashtags,
+            actor_id=actor_id,
+            results_limit_per_hashtag=limit,
+            ad_signal_tags=ad_signal_tags,
+            return_stats=True,
+        )
+        billing["hashtag_rows"] += int(stats.get("usable_media_rows", 0) or 0)
+        cumulative = _merge_hashtag_rounds(cumulative, round_candidates)
+
+        all_for_profile = merge_candidates(seed_candidates, cumulative)
+        _ensure_profile_cache(
+            client,
+            all_for_profile,
+            item_by_username,
+            profile_actor_id,
+            profile_include_latest_posts,
+            billing,
+        )
+        eligible = _count_eligible(all_for_profile, item_by_username, filters, seed_set)
+        est_cost = (
+            billing["hashtag_rows"] * hashtag_cost_per_result
+            + billing["profile_rows"] * profile_cost_per_result
+        )
+        print(
+            f"  adaptive hashtag round {round_idx}: limit={limit}, "
+            f"hashtag_creators={len(cumulative)}, merged={len(all_for_profile)}, "
+            f"follower_fit={eligible}/{target_candidates}, "
+            f"estimated_discovery_cost=${est_cost:.3f}"
+        )
+
+        if eligible >= target_candidates:
+            print("  adaptive hashtag: target reached")
+            break
+        if limit >= max_limit:
+            print("  adaptive hashtag: max search limit reached")
+            break
+
+        next_limit = int(math.ceil(limit * float(growth_factor)))
+        if next_limit <= limit:
+            next_limit = limit + 50
+        limit = min(max_limit, next_limit)
+
+    return cumulative, billing
+
 def main(config_path):
     load_dotenv()
     cfg = load_config(config_path)
@@ -209,34 +369,79 @@ def main(config_path):
     print(f"  references: positive={len(seeds)}, negative={len(negative_refs)}")
 
     print("[1/12] Candidate discovery")
-    # Cache Reference profile responses from discovery so the enrichment stage
-    # does not pay to scrape the same References again.
     discovery_profile_cache = {}
-    seed_candidates = discover_from_seeds(
-        client=client,
-        seed_usernames=seeds,
-        depth=dcfg.get("seed_expansion_depth", 1),
-        max_related_per_profile=dcfg.get("max_related_per_profile", 20),
-        max_candidates=dcfg.get("max_seed_candidates", 100),
-        profile_cache=discovery_profile_cache,
-        use_related_fallback=dcfg.get("use_related_fallback", True),
-        related_fallback_actor_id=dcfg.get(
-            "related_fallback_actor_id",
-            "instagram-scraper/instagram-related-profiles",
-        ),
-        profile_actor_id=profile_actor_id,
-    )
+    billing = {"hashtag_rows": 0, "profile_rows": 0}
+
+    target_candidates = max(1, int(dcfg.get("target_candidates", 100)))
+    has_hashtags = bool([x for x in dcfg.get("hashtags", []) if str(x).strip()])
+    has_seeds = bool(seeds)
+
+    # Minimal-GUI strategy: when both sources are present, Related is capped to
+    # a conservative share so it cannot consume the whole target by itself.
+    # Hashtag discovery then adaptively fills the remaining follower-fit target.
+    related_share = float(dcfg.get("related_share_when_both", 0.30))
+    if has_seeds and has_hashtags:
+        related_target_cap = max(1, int(math.ceil(target_candidates * related_share)))
+    else:
+        related_target_cap = target_candidates
+
+    seed_candidates = []
+    if has_seeds:
+        print(
+            f"  related discovery: ENABLED (hidden depth={dcfg.get('seed_expansion_depth', 2)}, "
+            f"max_candidates={related_target_cap})"
+        )
+        seed_candidates = discover_from_seeds(
+            client=client,
+            seed_usernames=seeds,
+            depth=dcfg.get("seed_expansion_depth", 2),
+            max_related_per_profile=dcfg.get("max_related_per_profile", 20),
+            max_candidates=related_target_cap,
+            profile_cache=discovery_profile_cache,
+            use_related_fallback=dcfg.get("use_related_fallback", True),
+            related_fallback_actor_id=dcfg.get(
+                "related_fallback_actor_id",
+                "instagram-scraper/instagram-related-profiles",
+            ),
+            profile_actor_id=profile_actor_id,
+        )
+        # Follower-fit count is needed before deciding how much hashtag search
+        # is necessary. Candidate profiles are cheap and cached for enrichment.
+        _ensure_profile_cache(
+            client,
+            seed_candidates,
+            discovery_profile_cache,
+            profile_actor_id,
+            profile_include_latest_posts,
+            billing,
+        )
+    else:
+        print("  related discovery: skipped (no reference accounts)")
+
     hashtag_candidates = []
-    if dcfg.get("use_hashtag_search", True):
-        hashtag_candidates = discover_by_hashtags(
+    if has_hashtags:
+        hashtag_candidates, billing = adaptive_hashtag_discovery(
             client=client,
             hashtags=dcfg.get("hashtags", []),
-            actor_id=dcfg.get("hashtag_actor_id", "publicsignallabs/instagram-hashtag-scraper"),
-            results_limit_per_hashtag=int(dcfg.get("hashtag_results_limit", 100)),
-            get_posts=bool(dcfg.get("hashtag_get_posts", True)),
-            get_reels=bool(dcfg.get("hashtag_get_reels", True)),
+            actor_id=dcfg.get("hashtag_actor_id", "dami_studio/instagram-hashtag-scraper"),
             ad_signal_tags=dcfg.get("hashtag_ad_signal_tags", cfg["analysis"].get("ad_keywords", [])),
+            profile_actor_id=profile_actor_id,
+            profile_include_latest_posts=profile_include_latest_posts,
+            item_by_username=discovery_profile_cache,
+            seed_candidates=seed_candidates,
+            seed_set=seed_set,
+            filters=filters,
+            target_candidates=target_candidates,
+            initial_limit=int(dcfg.get("hashtag_initial_results_limit", 50)),
+            growth_factor=float(dcfg.get("hashtag_growth_factor", 2.0)),
+            max_limit=int(dcfg.get("hashtag_max_results_limit", 500)),
+            max_rounds=int(dcfg.get("hashtag_max_rounds", 4)),
+            hashtag_cost_per_result=float(dcfg.get("hashtag_cost_per_result_usd", 0.0004)),
+            profile_cost_per_result=float(dcfg.get("profile_cost_per_result_usd", 0.0007)),
+            billing=billing,
         )
+    else:
+        print("  hashtag discovery: skipped (no hashtags)")
 
     keyword_candidates = []
     if dcfg.get("use_keyword_search", False):
@@ -249,10 +454,20 @@ def main(config_path):
         )
 
     candidates = merge_candidates(seed_candidates, hashtag_candidates, keyword_candidates)
+    follower_fit_discovery = _count_eligible(candidates, discovery_profile_cache, filters, seed_set)
+    estimated_discovery_cost = (
+        billing["hashtag_rows"] * float(dcfg.get("hashtag_cost_per_result_usd", 0.0004))
+        + billing["profile_rows"] * float(dcfg.get("profile_cost_per_result_usd", 0.0007))
+    )
     print(
         f"  discovery summary: related={len(seed_candidates)}, "
         f"hashtag={len(hashtag_candidates)}, google={len(keyword_candidates)}, "
-        f"merged_unique={len(candidates)}"
+        f"merged_unique={len(candidates)}, follower_fit={follower_fit_discovery}/{target_candidates}"
+    )
+    print(
+        f"  discovery billing estimate: hashtag_rows={billing['hashtag_rows']}, "
+        f"profile_rows={billing['profile_rows']}, estimated=${estimated_discovery_cost:.3f} "
+        "(Related Actor cost not included)"
     )
 
     print("[2/12] Profile enrichment")
@@ -308,7 +523,7 @@ def main(config_path):
         profile_posts.extend(user_posts)
         enriched.append(c)
 
-    print("[3/12] Hard filters + category")
+    print("[3/12] Candidate signals + category")
     # Reuse the already-scraped profile captions for both ad exclusion and text similarity.
     profile_posts = mark_ads(profile_posts, cfg["analysis"]["ad_keywords"])
     profile_posts_by_user = defaultdict(list)
@@ -396,7 +611,7 @@ def main(config_path):
         kept.append(c)
 
     candidates = kept
-    print(f"  after filters: {len(candidates)}")
+    print(f"  candidates retained (no reject): {len(candidates)}")
 
     print("[4/12] Caption + hashtag similarity")
     text_cfg = cfg.get("text_similarity", {})

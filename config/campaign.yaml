@@ -1,6 +1,6 @@
 campaign:
-  name: influencer_discovery_poc_v09_gui
-  product: 화장품
+  name: influencer_discovery_poc_v092_gui
+  product: 클렌즈 음료
 discovery:
   use_keyword_search: false
   google_actor_id: apify/google-search-scraper
@@ -11,22 +11,20 @@ discovery:
   - 운동 자기관리 여성 인플루언서
   - 라이프스타일 여성 인플루언서
   seed_usernames:
-  - go_manan20
-  - _mingdc
+  - lamuzes
+  - 2dumi
   seed_expansion_depth: 2
-  max_related_per_profile: 10
-  max_seed_candidates: 30
+  max_related_per_profile: 20
+  max_seed_candidates: 120
   use_related_fallback: true
   related_fallback_actor_id: instagram-scraper/instagram-related-profiles
   use_hashtag_search: true
-  hashtag_actor_id: publicsignallabs/instagram-hashtag-scraper
+  hashtag_actor_id: dami_studio/instagram-hashtag-scraper
   hashtags:
   - 올영세일
   - 올리브영추천
   - 뷰티추천
   hashtag_results_limit: 50
-  hashtag_get_posts: true
-  hashtag_get_reels: true
   hashtag_ad_signal_tags:
   - 광고
   - 협찬
@@ -34,6 +32,15 @@ discovery:
   - 유료광고
   profile_actor_id: dami_studio/instagram-profile-scraper
   profile_include_latest_posts: true
+  use_related_search: true
+  target_candidates: 100
+  related_share_when_both: 0.3
+  hashtag_initial_results_limit: 50
+  hashtag_growth_factor: 2.0
+  hashtag_max_results_limit: 500
+  hashtag_max_rounds: 5
+  hashtag_cost_per_result_usd: 0.0004
+  profile_cost_per_result_usd: 0.0007
 filters:
   min_followers: 30000
   max_followers: 500000
@@ -42,12 +49,17 @@ filters:
 targeting:
   include_keywords:
   - 자기관리
+  - 운동
+  - 직장인
   - 라이프스타일
-  - 피부관리
-  hard_exclude_keywords: []
-  soft_exclude_keywords: []
+  hard_exclude_keywords:
+  - 육아
+  - 키즈
+  soft_exclude_keywords:
+  - 뷰티
   soft_exclude_penalty: 0.1
-  hard_exclude_categories: []
+  hard_exclude_categories:
+  - parenting
   hard_exclude_category_threshold: 0.2
   gender_filter:
     enabled: true
@@ -111,7 +123,7 @@ visual:
   consistency_weight: 0.3
 performance:
   enabled: true
-  accounts_to_analyze: 10
+  accounts_to_analyze: 30
   ad_reels_target: 5
   max_reels_to_scan: 30
   only_posts_newer_than: 12 months
@@ -137,7 +149,7 @@ scoring:
     follower_fit: 0.05
 output:
   sqlite_path: data/influencers.db
-  excel_path: output/candidates_v09.xlsx
+  excel_path: output/candidates_v092.xlsx
 text_similarity:
   enabled: true
   model_name: intfloat/multilingual-e5-small
